@@ -10,6 +10,7 @@ REMOTE_DNS64_V4SERVER=8.8.8.8
 
 # Apiserver port
 APISERVER_PORT=${APISERVER_PORT:-8080}
+APISERVER_BINDIP=0.0.0.0
 
 # Number of nodes. 0 nodes means just one master node.
 # In case of NUM_NODES=0 'node-role.kubernetes.io/master' taint is removed

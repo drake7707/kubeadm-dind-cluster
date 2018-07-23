@@ -802,7 +802,7 @@ function dind::kubeadm-version {
 function dind::init {
   local -a opts
   dind::set-master-opts
-  local local_host="127.0.0.1"
+  local local_host="${APISERVER_BINDIP:-127.0.0.1}"
   if [[ ${IP_MODE} = "ipv6" ]]; then
       local_host="[::1]"
   fi
