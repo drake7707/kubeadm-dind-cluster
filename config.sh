@@ -6,19 +6,22 @@ else
     DIND_SUBNET="${DIND_SUBNET:-fd00:10::}"
 fi
 
+REMOTE_DNS64_V4SERVER=8.8.8.8
+
 # Apiserver port
 APISERVER_PORT=${APISERVER_PORT:-8080}
 
 # Number of nodes. 0 nodes means just one master node.
 # In case of NUM_NODES=0 'node-role.kubernetes.io/master' taint is removed
 # from the master node.
-NUM_NODES=${NUM_NODES:-2}
+#NUM_NODES=${NUM_NODES:-2}
+NUM_NODES=1
 
 # Use non-dockerized build
 # KUBEADM_DIND_LOCAL=
 
 # Use prebuilt DIND image
-DIND_IMAGE="${DIND_IMAGE:-mirantis/kubeadm-dind-cluster:v1.10}"
+DIND_IMAGE="${DIND_IMAGE:-mirantis/kubeadm-dind-cluster:v1.11}"
 
 # Set to non-empty string to enable building kubeadm
 # BUILD_KUBEADM=y
@@ -59,7 +62,8 @@ CNI_PLUGIN="${CNI_PLUGIN:-bridge}"
 
 # Define which DNS service to run
 # possible values are kube-dns (default) and coredns
-DNS_SERVICE="${DNS_SERVICE:-kube-dns}"
+#DNS_SERVICE="${DNS_SERVICE:-kube-dns}"
+DNS_SERVICE=kube-dns
 
 # Feature Gates
 # This value will be passed to kube-apiserver, kube-controller-manager and kube-scheduler

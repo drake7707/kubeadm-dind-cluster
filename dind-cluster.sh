@@ -676,6 +676,7 @@ function dind::run {
          -e HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE}" \
          -d --privileged \
          --net "$(dind::net-name)" \
+         --dns ${REMOTE_DNS64_V4SERVER} --dns ${dns_server} \
          --name "${container_name}" \
          --hostname "${container_name}" \
          -l "${DIND_LABEL}" \
