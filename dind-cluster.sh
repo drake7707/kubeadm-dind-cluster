@@ -904,7 +904,7 @@ EOF
 
 function dind::create-node-container {
   local reuse_volume=
-  if [[ $1 = -r ]]; then
+  if [[ ${1:-} = -r ]]; then
     reuse_volume="-r"
     shift
   fi
@@ -1628,7 +1628,7 @@ case "${1:-}" in
     shift
     dind::prepare-sys-mounts
     dind::ensure-kubectl
-    dind::join "$(dind::create-node-container 99)" "$@"
+    dind::join "$(dind::create-node-container)" "$@"
     ;;
   # bare)
   #   shift
