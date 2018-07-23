@@ -16,6 +16,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 set -o errtrace
+set -x 
 
 if [ $(uname) = Darwin ]; then
   readlinkf(){ perl -MCwd -e 'print Cwd::abs_path shift' "$1";}
@@ -804,7 +805,7 @@ function dind::init {
   dind::set-master-opts
   local local_host="${APISERVER_BINDIP:-127.0.0.1}"
   if [[ ${IP_MODE} = "ipv6" ]]; then
-      local_host="[::1]"
+      local_host="${APISERVER_BINDIP:-[::1]}"
   fi
   local master_name container_id
   master_name="$(dind::master-name)"
@@ -1111,11 +1112,13 @@ function dind::wait-for-ready {
   echo "[done]" >&2
 
   dind::retry "${kubectl}" --context "$ctx" get nodes >&2
-  local_host="localhost"
+  local_host="${APISERVER_BINDIP:-127.0.0.1}"
   if [[ ${IP_MODE} = "ipv6" ]]; then
-      local_host="[::1]"
+      local_host="${APISERVER_BINDIP:-[::1]}"
   fi
   dind::step "Access dashboard at:" "http://${local_host}:${APISERVER_PORT}/api/v1/namespaces/kube-system/services/kubernetes-dashboard:/proxy"
+
+  dind::step "Join nodes with the following args: " ${kubeadm_join_flags}
 }
 
 function dind::up {
@@ -1248,9 +1251,10 @@ function dind::restore {
     (
       if [[ n -eq 0 ]]; then
         dind::step "Restoring master container"
-        local local_host="127.0.0.1"
+
+        local local_host="${APISERVER_BINDIP:-127.0.0.1}"
         if [[ ${IP_MODE} = "ipv6" ]]; then
-          local_host="[::1]"
+           local_host="${APISERVER_BINDIP:-[::1]}"
         fi
         dind::restore_container "$(dind::run -r "$(dind::master-name)" "${kube_master_ip}" 1 ${local_host}:${APISERVER_PORT}:${INTERNAL_APISERVER_PORT} ${master_opts[@]+"${master_opts[@]}"})"
         dind::step "Master container restored"
@@ -1624,7 +1628,7 @@ case "${1:-}" in
     shift
     dind::prepare-sys-mounts
     dind::ensure-kubectl
-    dind::join "$(dind::create-node-container)" "$@"
+    dind::join "$(dind::create-node-container 99)" "$@"
     ;;
   # bare)
   #   shift
