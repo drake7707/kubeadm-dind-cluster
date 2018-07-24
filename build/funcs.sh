@@ -32,9 +32,9 @@ HYPERKUBE_SHA1=${HYPERKUBE_SHA1:-}
 #                 gcr.io/google_containers/etcd-amd64:2.2.5
 #                 gcr.io/google_containers/etcd:2.2.1)
 
-hypokube_base_image=mirantis/hypokube:base
+hypokube_base_image=idlabfuse/hypokube:base
 image_version_suffix=v4
-image_name="mirantis/kubeadm-dind-cluster"
+image_name="idlabfuse/kubeadm-dind-cluster"
 BARE_IMAGE_NAME="${image_name}:bare-${image_version_suffix}"
 
 function dind::step {

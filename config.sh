@@ -6,6 +6,11 @@ else
     DIND_SUBNET="${DIND_SUBNET:-fd00:10::}"
 fi
 
+VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-/home/dwight/kube4.ovpn}
+VPN_IMAGE=${VPN_IMAGE:-drake7707/openvpn-client}
+# TODO this can be inferred from the openvpn container
+VPN_SUBNET=192.168.255.0/24
+
 REMOTE_DNS64_V4SERVER=8.8.8.8
 
 # Apiserver port
@@ -25,7 +30,9 @@ NUM_NODES=1
 # KUBEADM_DIND_LOCAL=
 
 # Use prebuilt DIND image
-DIND_IMAGE="${DIND_IMAGE:-mirantis/kubeadm-dind-cluster:v1.11}"
+#DIND_IMAGE="${DIND_IMAGE:-mirantis/kubeadm-dind-cluster:v1.11}"
+DIND_IMAGE="${DIND_IMAGE:-idlabfuse/kubeadm-dind-cluster:v1.11}"
+DIND_SKIP_PULL=y
 
 # Set to non-empty string to enable building kubeadm
 # BUILD_KUBEADM=y

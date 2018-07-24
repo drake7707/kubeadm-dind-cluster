@@ -19,12 +19,20 @@ set -o pipefail
 set -o errtrace
 
 DIND_ROOT=$(dirname "${BASH_SOURCE}")/..
+source "$DIND_ROOT/build/funcs.sh"
 
-fixed_dir="${DIND_ROOT}/fixed"
-mkdir -p "${fixed_dir}"
-for tag in v1.8 v1.9 v1.10 v1.11 stable; do
-  dest="${fixed_dir}/dind-cluster-${tag}.sh"
-  sed "s@#%CONFIG%@EMBEDDED_CONFIG=y;DIND_IMAGE=idlabfuse/kubeadm-dind-cluster:${tag}@" \
-      "${DIND_ROOT}/dind-cluster.sh" >"${dest}"
-  chmod +x "${dest}"
-done
+dind::build-base
+
+IMAGE_NAME="idlabfuse/kubeadm-dind-cluster"
+v="1.11"
+
+version="${v//./_}"
+eval "HYPERKUBE_URL=\${HYPERKUBE_URL_${version}}"
+eval "HYPERKUBE_SHA1=\${HYPERKUBE_SHA1_${version}}"
+kubeadm_version="${version}"
+eval "KUBEADM_URL=\${KUBEADM_URL_${version}}"
+eval "KUBEADM_SHA1=\${KUBEADM_SHA1_${version}}"
+tag="v${v}"
+cur_image="${IMAGE_NAME}:${tag}"
+
+dind::build-image "${cur_image}"

@@ -22,8 +22,8 @@ set -o errtrace
 HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE:-keep://}"
 KUBEADM_SOURCE="${KUBEADM_SOURCE:-keep://}"
 
-hypokube_base_image="mirantis/hypokube:base"
-hypokube_final_image="mirantis/hypokube:final"
+hypokube_base_image="idlabfuse/hypokube:base"
+hypokube_final_image="idlabfuse/hypokube:final"
 build_src_dir="/go/src/k8s.io/kubernetes"
 binary_dir="/k8s"
 # FIXME: don't hardcode
