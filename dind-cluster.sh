@@ -874,8 +874,13 @@ function dind::init {
     api_version="kubeadm.k8s.io/v1alpha1"
   fi
   docker exec -i "$master_name" bash <<EOF
+
+  if [[ -z "${MASTER_ADVERTISE_IP}" ]]; then
+    MASTER_ADVERTISE_IP="${kube_master_ip}"
+  fi
+
 sed -e "s|{{API_VERSION}}|${api_version}|" \
-    -e "s|{{ADV_ADDR}}|${kube_master_ip}|" \
+    -e "s|{{ADV_ADDR}}|${MASTER_ADVERTISE_IP}|" \
     -e "s|{{POD_SUBNET_DISABLE}}|${pod_subnet_disable}|" \
     -e "s|{{POD_NETWORK_CIDR}}|${POD_NETWORK_CIDR}|" \
     -e "s|{{SVC_SUBNET}}|${SERVICE_CIDR}|" \
