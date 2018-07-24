@@ -1,4 +1,4 @@
-FROM mirantis/kubeadm-dind-cluster:bare-v4
+FROM idlabfuse/kubeadm-dind-cluster:bare-v4
 
 # the following args should be set for derived images
 

@@ -105,7 +105,8 @@ if [[ ${IP_MODE} != "ipv6" ]]; then
 else
     DNS_SVC_IP="${dns_prefix}a"
 fi
-kube_master_ip="${dind_ip_base}2"
+vpn_ip="${dind_ip_base}2"
+kube_master_ip="${dind_ip_base}3"
 
 POD_NETWORK_CIDR="${POD_NETWORK_CIDR:-${DEFAULT_POD_NETWORK_CIDR}}"
 if [[ ${IP_MODE} = "ipv6" ]]; then
@@ -590,6 +591,39 @@ function dind::ensure-nat {
     fi
 }
 
+function dind:run-vpn {
+  local container_name="${1:-}"
+  local ip="${2:-}"
+
+  local ip_arg="--ip"
+  if [[ ${IP_MODE} = "ipv6" ]]; then
+      ip_arg="--ip6"
+  fi
+  if [[ $# -gt 2 ]]; then
+    shift 2
+  else
+    shift $#
+  fi
+
+  # remove any previously created containers with the same name
+  docker rm -vf "${container_name}" >&/dev/null || true
+  
+  dind::ensure-network
+
+  dind::step "Starting VPN container:" "${container_name}"
+
+  docker run -d \
+  --name "${container_name}" \
+  --hostname "${container_name}" \
+  --cap-add=NET_ADMIN \
+  --device /dev/net/tun \
+  --net "$(dind::net-name)" \
+  -l "${DIND_LABEL}" \
+  -v ${VPN_CONFIG_FILE}:/vpn/client.conf \
+  "${ip_arg}" "${ip}" \
+  "${VPN_IMAGE}"
+}
+
 function dind::run {
   local reuse_volume=
   if [[ $1 = -r ]]; then
@@ -675,6 +709,8 @@ function dind::run {
 	 -e IP_MODE="${IP_MODE}" \
          -e KUBEADM_SOURCE="${KUBEADM_SOURCE}" \
          -e HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE}" \
+         -e VPN_SUBNET="${VPN_SUBNET}" \
+         -e VPN_IP="${vpn_ip}" \
          -d --privileged \
          --net "$(dind::net-name)" \
          --dns ${REMOTE_DNS64_V4SERVER} --dns ${dns_server} \
@@ -715,7 +751,7 @@ function dind::kubeadm {
 
 function dind::configure-kubectl {
   dind::step "Setting cluster config"
-  local host="${dind_ip_base}2"
+  local host="${dind_ip_base}3"
   if [[ ${IP_MODE} = "ipv6" ]]; then
       host="[${host}]"
   fi
@@ -807,9 +843,16 @@ function dind::init {
   if [[ ${IP_MODE} = "ipv6" ]]; then
       local_host="${APISERVER_BINDIP:-[::1]}"
   fi
+
+  # Setup the VPN networking first
+  local vpn_container_id
+  vpn_name="$(dind::vpn-name)"
+  vpn_container_id=$(dind:run-vpn "${vpn_name}" "${vpn_ip}")
+
   local master_name container_id
   master_name="$(dind::master-name)"
   container_id=$(dind::run "${master_name}" "${kube_master_ip}" 1 ${local_host}:${APISERVER_PORT}:${INTERNAL_APISERVER_PORT} ${master_opts[@]+"${master_opts[@]}"})
+
   # FIXME: I tried using custom tokens with 'kubeadm ex token create' but join failed with:
   # 'failed to parse response as JWS object [square/go-jose: compact JWS format must have three parts]'
   # So we just pick the line from 'kubeadm init' output
@@ -873,12 +916,12 @@ function dind::init {
   if [[ ${kubeadm_version} =~ 1\.(8|9|10)\. ]]; then
     api_version="kubeadm.k8s.io/v1alpha1"
   fi
-  docker exec -i "$master_name" bash <<EOF
 
   if [[ -z "${MASTER_ADVERTISE_IP}" ]]; then
     MASTER_ADVERTISE_IP="${kube_master_ip}"
   fi
 
+  docker exec -i "$master_name" bash <<EOF
 sed -e "s|{{API_VERSION}}|${api_version}|" \
     -e "s|{{ADV_ADDR}}|${MASTER_ADVERTISE_IP}|" \
     -e "s|{{POD_SUBNET_DISABLE}}|${pod_subnet_disable}|" \
@@ -917,7 +960,7 @@ function dind::create-node-container {
   # kube-node-1 hostname, if there are two nodes, we should pick
   # kube-node-2 and so on
   local next_node_index=${1:-$(docker ps -q --filter=label="${DIND_LABEL}" | wc -l | sed 's/^ *//g')}
-  local node_ip="${dind_ip_base}$((next_node_index + 2))"
+  local node_ip="${dind_ip_base}$((next_node_index + 3))"
   local -a opts
   if [[ ${BUILD_KUBEADM} || ${BUILD_HYPERKUBE} ]]; then
     opts+=(-v "dind-k8s-binaries$(dind::clusterSuffix)":/k8s)
@@ -1309,6 +1352,10 @@ function dind::master-name {
 function dind::node-name {
   local nr="$1"
   echo "kube-node-${nr}$( dind::clusterSuffix )"
+}
+
+function dind::vpn-name {
+  echo "kube-vpn$( dind::clusterSuffix )"
 }
 
 function dind::clusterSuffix {

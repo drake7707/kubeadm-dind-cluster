@@ -100,8 +100,14 @@ EOF
     fi
 }
 
+function dind::setup-vpn-route {
+  # Add the route so everything on the VPN subnet goes to the VPN container
+  ip r r ${VPN_SUBNET:-} via ${VPN_IP:-} dev eth0
+}
 
 # ******************** START ********************
+dind::setup-vpn-route
+
 get_ipv4_info eth0
 if [[ "${IP_MODE}" = "ipv6" ]]; then
   get_ipv6_info eth0

@@ -54,7 +54,7 @@ export POD_NETWORK_CIDR="10.244.0.0/16"
 if [[ ${NOBUILD} ]]; then
   bash -x "${DIND_ROOT}"/dind-cluster.sh clean
 else
-  export DIND_IMAGE=mirantis/kubeadm-dind-cluster:local
+  export DIND_IMAGE=idlabfuse/kubeadm-dind-cluster:local
 fi
 
 function test-cluster {
@@ -104,7 +104,7 @@ function test-case-1.8 {
     export HYPERKUBE_URL="${HYPERKUBE_URL_1_8}"
     export HYPERKUBE_SHA1="${HYPERKUBE_SHA1_1_8}"
     if [[ ${NOBUILD} ]]; then
-      export DIND_IMAGE=mirantis/kubeadm-dind-cluster:v1.8
+      export DIND_IMAGE=idlabfuse/kubeadm-dind-cluster:v1.8
       docker pull "${DIND_IMAGE}"
     else
       export LOCAL_KUBECTL_VERSION=v1.8
@@ -149,7 +149,7 @@ function test-case-1.9 {
     export HYPERKUBE_URL="${HYPERKUBE_URL_1_9}"
     export HYPERKUBE_SHA1="${HYPERKUBE_SHA1_1_9}"
     if [[ ${NOBUILD} ]]; then
-        export DIND_IMAGE=mirantis/kubeadm-dind-cluster:v1.9
+        export DIND_IMAGE=idlabfuse/kubeadm-dind-cluster:v1.9
         docker pull "${DIND_IMAGE}"
     else
         export LOCAL_KUBECTL_VERSION=v1.9
@@ -194,7 +194,7 @@ function test-case-1.10 {
     export HYPERKUBE_URL="${HYPERKUBE_URL_1_10}"
     export HYPERKUBE_SHA1="${HYPERKUBE_SHA1_1_10}"
     if [[ ${NOBUILD} ]]; then
-        export DIND_IMAGE=mirantis/kubeadm-dind-cluster:v1.10
+        export DIND_IMAGE=idlabfuse/kubeadm-dind-cluster:v1.10
         docker pull "${DIND_IMAGE}"
     else
         export LOCAL_KUBECTL_VERSION=v1.10
