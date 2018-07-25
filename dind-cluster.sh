@@ -652,6 +652,7 @@ function helper::network()
 
 
 function dind::ensure-vpn {
+  local target_ip=$1
 
   local vpn_container_id
   vpn_name="$(dind::vpn-name)"
@@ -678,6 +679,11 @@ function dind::ensure-vpn {
     echo -n "." >&2
     sleep 1
   done
+
+  # add a rule to forward all traffic as destination to the vpn container to the to the target ip
+  # TODO: this might be doable with iptables without having to set a fixed ip address and NAT but I don't know how, iptables doesn't forward
+  # packets that have the destination of the tunnel interface ip itself. The only way to move them onto eth0 is by rewriting the destination
+  docker exec "${vpn_name}" iptables -t nat -A PREROUTING -d ${vpn_ip} -j DNAT --to-destination ${target_ip}
 }
 
 function dind::run {
@@ -729,11 +735,7 @@ function dind::run {
   args+=("systemd.setenv=DNS_SVC_IP=${DNS_SVC_IP}")
   args+=("systemd.setenv=DNS_SERVICE=${DNS_SERVICE}")
 
-  # push the vpn subnet and ip so it can setup the proper routing
-  args+=("systemd.setenv=VPN_SUBNET=${VPN_SUBNET}")
-  args+=("systemd.setenv=VPN_IP=${vpn_ip}")
-  args+=("systemd.setenv=VPN_CONTAINER_IP=${vpn_container_ip}")
-
+  
   if [[ ! "${container_name}" ]]; then
     echo >&2 "Must specify container name"
     exit 1
@@ -762,6 +764,16 @@ function dind::run {
   dind::ensure-volume ${reuse_volume} "${volume_name}"
   dind::ensure-nat
   dind::ensure-dns
+  dind::ensure-vpn "${ip}"
+
+  # push the vpn subnet and ip so it can setup the proper routing
+  args+=("systemd.setenv=VPN_SUBNET=${VPN_SUBNET}")
+  args+=("systemd.setenv=VPN_IP=${vpn_ip}")
+  args+=("systemd.setenv=VPN_CONTAINER_IP=${vpn_container_ip}")
+
+  # make sure the kubelet binds its internal ip to the vpn ip
+  args+=("systemd.setenv=KUBELET_EXTRA_ARGS=\"--node-ip=${vpn_ip}\"")
+
 
   # TODO: create named volume for binaries and mount it to /k8s
   # in case of the source build
@@ -903,9 +915,6 @@ function dind::init {
   if [[ ${IP_MODE} = "ipv6" ]]; then
       local_host="${APISERVER_BINDIP:-[::1]}"
   fi
-
-  # Setup the VPN networking first
-  dind::ensure-vpn
 
   local master_name container_id
   master_name="$(dind::master-name)"

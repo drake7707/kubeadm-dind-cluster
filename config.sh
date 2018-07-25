@@ -7,7 +7,7 @@ else
 fi
 
 VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-/home/dwight/kube4.ovpn}
-VPN_IMAGE=${VPN_IMAGE:-drake7707/openvpn-client}
+VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client}
 # TODO this can be inferred from the openvpn container
 VPN_SUBNET=192.168.255.0/24
 
