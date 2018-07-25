@@ -24,7 +24,7 @@ MASTER_ADVERTISE_IP=192.168.255.6
 # In case of NUM_NODES=0 'node-role.kubernetes.io/master' taint is removed
 # from the master node.
 #NUM_NODES=${NUM_NODES:-2}
-NUM_NODES=1
+NUM_NODES=0
 
 # Use non-dockerized build
 # KUBEADM_DIND_LOCAL=
