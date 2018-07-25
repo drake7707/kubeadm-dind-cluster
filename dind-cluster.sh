@@ -153,7 +153,7 @@ NUM_NODES=${NUM_NODES:-2}
 EXTRA_PORTS="${EXTRA_PORTS:-}"
 LOCAL_KUBECTL_VERSION=${LOCAL_KUBECTL_VERSION:-}
 KUBECTL_DIR="${KUBECTL_DIR:-${HOME}/.kubeadm-dind-cluster}"
-DASHBOARD_URL="${DASHBOARD_URL:-https://rawgit.com/kubernetes/dashboard/bfab10151f012d1acc5dfb1979f3172e2400aa3c/src/deploy/kubernetes-dashboard.yaml}"
+#DASHBOARD_URL="${DASHBOARD_URL:-https://rawgit.com/kubernetes/dashboard/bfab10151f012d1acc5dfb1979f3172e2400aa3c/src/deploy/kubernetes-dashboard.yaml}"
 SKIP_SNAPSHOT="${SKIP_SNAPSHOT:-}"
 E2E_REPORT_DIR="${E2E_REPORT_DIR:-}"
 DIND_NO_PARALLEL_E2E="${DIND_NO_PARALLEL_E2E:-}"
@@ -898,7 +898,8 @@ function dind::ensure-dashboard-clusterrolebinding {
 
 function dind::deploy-dashboard {
   dind::step "Deploying k8s dashboard"
-  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DASHBOARD_URL}"
+  #dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DASHBOARD_URL}"
+  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DIND_ROOT}/kube-dashboard.yml"
   # https://kubernetes-io-vnext-staging.netlify.com/docs/admin/authorization/rbac/#service-account-permissions
   # Thanks @liggitt for the hint
   dind::retry dind::ensure-dashboard-clusterrolebinding
@@ -1312,7 +1313,8 @@ function dind::up {
       ;;
     flannel)
       # without --validate=false this will fail on older k8s versions
-      dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "https://github.com/coreos/flannel/blob/master/Documentation/kube-flannel.yml?raw=true"
+      #dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "https://github.com/coreos/flannel/blob/master/Documentation/kube-flannel.yml?raw=true"
+      dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "${DIND_ROOT}/kube-flannel.yml"
       ;;
     calico)
       dind::retry "${kubectl}" --context "$ctx" apply -f https://docs.projectcalico.org/v2.6/getting-started/kubernetes/installation/hosted/kubeadm/1.6/calico.yaml
