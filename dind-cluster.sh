@@ -105,6 +105,7 @@ if [[ ${IP_MODE} != "ipv6" ]]; then
 else
     DNS_SVC_IP="${dns_prefix}a"
 fi
+
 vpn_container_ip="${dind_ip_base}2"
 kube_master_ip="${dind_ip_base}3"
 
@@ -591,7 +592,7 @@ function dind::ensure-nat {
     fi
 }
 
-function dind:run-vpn {
+function dind::run-vpn {
   local container_name="${1:-}"
   local ip="${2:-}"
 
@@ -618,6 +619,7 @@ function dind:run-vpn {
   --cap-add=NET_ADMIN \
   --device /dev/net/tun \
   --net "$(dind::net-name)" \
+  --restart=unless-stopped \
   -l "${DIND_LABEL}" \
   -v ${VPN_CONFIG_FILE}:/vpn/client.conf \
   "${ip_arg}" "${ip}" \
@@ -656,13 +658,13 @@ function dind::ensure-vpn {
 
   local vpn_container_id
   vpn_name="$(dind::vpn-name)"
-  vpn_container_id=$(dind:run-vpn "${vpn_name}" "${vpn_container_ip}")
+  vpn_container_id=$(dind::run-vpn "${vpn_name}" "${vpn_container_ip}")
 
   local n=3
   local ntries=60
   while true; do
 
-    vpn_ip=$((docker exec "${vpn_name}" ip addr show tun0 | grep -oP "(?<=inet ).*(?=/)" | cut -d ' ' -f 1) || true)
+    vpn_ip=$(dind::get-vpn-ip)
     
     if [[ "$vpn_ip" ]]; then
       if ((--n == 0)); then
@@ -684,6 +686,12 @@ function dind::ensure-vpn {
   # TODO: this might be doable with iptables without having to set a fixed ip address and NAT but I don't know how, iptables doesn't forward
   # packets that have the destination of the tunnel interface ip itself. The only way to move them onto eth0 is by rewriting the destination
   docker exec "${vpn_name}" iptables -t nat -A PREROUTING -d ${vpn_ip} -j DNAT --to-destination ${target_ip}
+}
+
+function dind::get-vpn-ip {
+  vpn_name="$(dind::vpn-name)"
+  vpn_ip=$((docker exec "${vpn_name}" ip addr show tun0 | grep -oP "(?<=inet ).*(?=/)" | cut -d ' ' -f 1) || true)
+  echo $vpn_ip
 }
 
 function dind::run {
@@ -984,9 +992,8 @@ function dind::init {
     api_version="kubeadm.k8s.io/v1alpha1"
   fi
 
-  if [[ -z "${MASTER_ADVERTISE_IP}" ]]; then
-    MASTER_ADVERTISE_IP="${kube_master_ip}"
-  fi
+  #let kubernetes listen on the vpn
+  MASTER_ADVERTISE_IP="$(dind::get-vpn-ip)"
 
   docker exec -i "$master_name" bash <<EOF
 sed -e "s|{{API_VERSION}}|${api_version}|" \
@@ -1003,8 +1010,10 @@ sed -e "s|{{API_VERSION}}|${api_version}|" \
     -e "s|{{CONTROLLER_MANAGER_EXTRA_ARGS}}|${controller_manager_extra_args}|" \
     -e "s|{{SCHEDULER_EXTRA_ARGS}}|${scheduler_extra_args}|" \
     -e "s|{{KUBE_MASTER_NAME}}|${master_name}|" \
+    -e "s|{{KUBE_IMAGE_REPOSITORY}}|${KUBE_IMAGE_REPOSITORY:-k8s.gcr.io}|" \
     /etc/kubeadm.conf.tmpl > /etc/kubeadm.conf
 EOF
+
   # TODO: --skip-preflight-checks needs to be replaced with
   # --ignore-preflight-errors=all for k8s 1.10+
   # (need to check k8s 1.9)

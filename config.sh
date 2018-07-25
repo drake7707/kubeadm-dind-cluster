@@ -13,12 +13,19 @@ VPN_SUBNET=192.168.255.0/24
 
 REMOTE_DNS64_V4SERVER=8.8.8.8
 
+
+
+
+# Image repository for kube adm to pull images such as control plane from
+#KUBE_IMAGE_REPOSITORY=${KUBE_IMAGE_REPOSITORY:-k8s.gcr.io}
+KUBE_IMAGE_REPOSITORY=10.10.127.48:5000
+
+# The image repository is insecure, so make sure to add it to the /etc/docker/daemon.json
+DIND_INSECURE_REGISTRIES="[ \"10.10.127.48:5000\" ]"
+
 # Apiserver port
 APISERVER_PORT=${APISERVER_PORT:-8080}
 APISERVER_BINDIP=0.0.0.0
-
-# IP that will be used to advertise the API server
-MASTER_ADVERTISE_IP=192.168.255.6
 
 # Number of nodes. 0 nodes means just one master node.
 # In case of NUM_NODES=0 'node-role.kubernetes.io/master' taint is removed
@@ -51,17 +58,20 @@ DIND_SKIP_PULL=y
 # CNI plugin to use (bridge, flannel, calico, calico-kdd, weave). Defaults to 'bridge'
 # In case of 'bridge' plugin, additional hacks are employed to bridge
 # DIND containers together.
-CNI_PLUGIN="${CNI_PLUGIN:-bridge}"
+CNI_PLUGIN="${CNI_PLUGIN:-flannel}"
 
 # When using Calico with Kubernetes as the datastore (calico-kdd) your
 # controller manager needs to be started with `--cluster-cidr=192.168.0.0/16`.
 # More information here: http://docs.projectcalico.org/v2.3/getting-started/kubernetes/installation/hosted/kubernetes-datastore/
 # POD_NETWORK_CIDR="192.168.0.0/16"
 
+# flannel needs 10.244 range
+POD_NETWORK_CIDR="10.244.0.0/16"
+
 # Set SKIP_SNAPSHOT to non-empty string to skip making the snapshot.
 # This may be useful for CI environment where the cluster is never
 # restarted after it's created.
-# SKIP_SNAPSHOT=y
+SKIP_SNAPSHOT=y
 
 # Disable parallel running of e2e tests. Use this if you use a resource
 # constrained machine for e2e tests and get some flakes.

@@ -11,6 +11,7 @@ api:
 networking:
   {{POD_SUBNET_DISABLE}}podSubnet: "{{POD_NETWORK_CIDR}}"
   serviceSubnet: "{{SVC_SUBNET}}"
+imageRepository: "{{KUBE_IMAGE_REPOSITORY}}"
 tokenTTL: 0s
 nodeName: {{KUBE_MASTER_NAME}}
 apiServerExtraArgs:
