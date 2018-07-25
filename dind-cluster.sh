@@ -928,6 +928,8 @@ function dind::init {
   master_name="$(dind::master-name)"
   container_id=$(dind::run "${master_name}" "${kube_master_ip}" 1 ${local_host}:${APISERVER_PORT}:${INTERNAL_APISERVER_PORT} ${master_opts[@]+"${master_opts[@]}"})
 
+  dind::fix-missing-pause "${container_id}"
+
   # FIXME: I tried using custom tokens with 'kubeadm ex token create' but join failed with:
   # 'failed to parse response as JWS object [square/go-jose: compact JWS format must have three parts]'
   # So we just pick the line from 'kubeadm init' output
@@ -1052,13 +1054,29 @@ function dind::create-node-container {
   dind::run ${reuse_volume} "$node_name" ${node_ip} $((next_node_index + 1)) "${EXTRA_PORTS}" ${opts[@]+"${opts[@]}"}
 }
 
+function dind::fix-missing-pause {
+  # For issue https://github.com/kubernetes/kubeadm/issues/1003
+  # The pause is not using the image repository
+
+  # So pull the correct one and retag if using a custom repository
+  if [[ "${KUBE_IMAGE_REPOSITORY}" ]]; then 
+    dind::step "Fixing missing pause image"
+    docker exec "${container_id}" docker pull "${KUBE_IMAGE_REPOSITORY}/pause:3.1" 
+    docker exec "${container_id}" docker tag "${KUBE_IMAGE_REPOSITORY}/pause:3.1" "k8s.gcr.io/pause:3.1"
+  fi
+}
+
 function dind::join {
   local container_id="$1"
   shift
   dind::proxy "${container_id}"
   dind::custom-docker-opts "${container_id}"
+
+  dind::fix-missing-pause "${container_id}"
   dind::kubeadm "${container_id}" join --skip-preflight-checks "$@" >/dev/null
 }
+
+
 
 function dind::escape-e2e-name {
     sed 's/[]\$*.^()[]/\\&/g; s/\s\+/\\s+/g' <<< "$1" | tr -d '\n'
