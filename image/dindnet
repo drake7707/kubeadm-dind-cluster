@@ -102,7 +102,9 @@ EOF
 
 function dind::setup-vpn-route {
   # Add the route so everything on the VPN subnet goes to the VPN container
-  ip r r ${VPN_SUBNET:-} via ${VPN_IP:-} dev eth0
+  ip r r ${VPN_SUBNET:-} via ${VPN_CONTAINER_IP:-} dev eth0
+  # Add the assigned VPN ip to the eth0 so any request on that ip goes to localhost
+  ip address add ${VPN_IP:-} dev eth0
 }
 
 # ******************** START ********************

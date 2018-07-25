@@ -105,7 +105,7 @@ if [[ ${IP_MODE} != "ipv6" ]]; then
 else
     DNS_SVC_IP="${dns_prefix}a"
 fi
-vpn_ip="${dind_ip_base}2"
+vpn_container_ip="${dind_ip_base}2"
 kube_master_ip="${dind_ip_base}3"
 
 POD_NETWORK_CIDR="${POD_NETWORK_CIDR:-${DEFAULT_POD_NETWORK_CIDR}}"
@@ -624,6 +624,62 @@ function dind:run-vpn {
   "${VPN_IMAGE}"
 }
 
+
+function helper::ip2int()
+{
+    local a b c d
+    { IFS=. read a b c d; } <<< $1
+    echo $(((((((a << 8) | b) << 8) | c) << 8) | d))
+}
+
+function helper::int2ip()
+{
+    local ui32=$1; shift
+    local ip n
+    for n in 1 2 3 4; do
+        ip=$((ui32 & 0xff))${ip:+.}$ip
+        ui32=$((ui32 >> 8))
+    done
+    echo $ip
+}
+
+function helper::network()
+{
+    local addr=$(helper::ip2int $1); shift
+    local mask=$((0xffffffff << (32 -$1))); shift
+    helper::int2ip $((addr & mask))
+}
+
+
+function dind::ensure-vpn {
+
+  local vpn_container_id
+  vpn_name="$(dind::vpn-name)"
+  vpn_container_id=$(dind:run-vpn "${vpn_name}" "${vpn_container_ip}")
+
+  local n=3
+  local ntries=60
+  while true; do
+
+    vpn_ip=$((docker exec "${vpn_name}" ip addr show tun0 | grep -oP "(?<=inet ).*(?=/)" | cut -d ' ' -f 1) || true)
+    
+    if [[ "$vpn_ip" ]]; then
+      if ((--n == 0)); then
+        echo "[done]" >&2
+        break
+      fi
+    else
+      n=3
+    fi
+    if ((--ntries == 0)); then
+      echo "Error waiting for vpn to establish connection"
+      exit 1
+    fi
+    echo -n "." >&2
+    sleep 1
+  done
+}
+
 function dind::run {
   local reuse_volume=
   if [[ $1 = -r ]]; then
@@ -672,6 +728,12 @@ function dind::run {
   args+=("systemd.setenv=USE_HAIRPIN=${USE_HAIRPIN}")
   args+=("systemd.setenv=DNS_SVC_IP=${DNS_SVC_IP}")
   args+=("systemd.setenv=DNS_SERVICE=${DNS_SERVICE}")
+
+  # push the vpn subnet and ip so it can setup the proper routing
+  args+=("systemd.setenv=VPN_SUBNET=${VPN_SUBNET}")
+  args+=("systemd.setenv=VPN_IP=${vpn_ip}")
+  args+=("systemd.setenv=VPN_CONTAINER_IP=${vpn_container_ip}")
+
   if [[ ! "${container_name}" ]]; then
     echo >&2 "Must specify container name"
     exit 1
@@ -709,8 +771,6 @@ function dind::run {
 	 -e IP_MODE="${IP_MODE}" \
          -e KUBEADM_SOURCE="${KUBEADM_SOURCE}" \
          -e HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE}" \
-         -e VPN_SUBNET="${VPN_SUBNET}" \
-         -e VPN_IP="${vpn_ip}" \
          -d --privileged \
          --net "$(dind::net-name)" \
          --dns ${REMOTE_DNS64_V4SERVER} --dns ${dns_server} \
@@ -845,9 +905,7 @@ function dind::init {
   fi
 
   # Setup the VPN networking first
-  local vpn_container_id
-  vpn_name="$(dind::vpn-name)"
-  vpn_container_id=$(dind:run-vpn "${vpn_name}" "${vpn_ip}")
+  dind::ensure-vpn
 
   local master_name container_id
   master_name="$(dind::master-name)"
