@@ -899,7 +899,7 @@ function dind::ensure-dashboard-clusterrolebinding {
 function dind::deploy-dashboard {
   dind::step "Deploying k8s dashboard"
   #dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DASHBOARD_URL}"
-  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DIND_ROOT}/kube-dashboard.yml"
+  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DIND_ROOT}/deployments/kube-dashboard.yml"
   # https://kubernetes-io-vnext-staging.netlify.com/docs/admin/authorization/rbac/#service-account-permissions
   # Thanks @liggitt for the hint
   dind::retry dind::ensure-dashboard-clusterrolebinding
@@ -928,8 +928,6 @@ function dind::init {
   local master_name container_id
   master_name="$(dind::master-name)"
   container_id=$(dind::run "${master_name}" "${kube_master_ip}" 1 ${local_host}:${APISERVER_PORT}:${INTERNAL_APISERVER_PORT} ${master_opts[@]+"${master_opts[@]}"})
-
-  dind::fix-missing-pause "${container_id}"
 
   # FIXME: I tried using custom tokens with 'kubeadm ex token create' but join failed with:
   # 'failed to parse response as JWS object [square/go-jose: compact JWS format must have three parts]'
@@ -1016,6 +1014,8 @@ sed -e "s|{{API_VERSION}}|${api_version}|" \
     -e "s|{{KUBE_IMAGE_REPOSITORY}}|${KUBE_IMAGE_REPOSITORY:-k8s.gcr.io}|" \
     /etc/kubeadm.conf.tmpl > /etc/kubeadm.conf
 EOF
+
+  dind::fix-missing-pause "${container_id}"
 
   # TODO: --skip-preflight-checks needs to be replaced with
   # --ignore-preflight-errors=all for k8s 1.10+
@@ -1314,7 +1314,7 @@ function dind::up {
     flannel)
       # without --validate=false this will fail on older k8s versions
       #dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "https://github.com/coreos/flannel/blob/master/Documentation/kube-flannel.yml?raw=true"
-      dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "${DIND_ROOT}/kube-flannel.yml"
+      dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "${DIND_ROOT}/deployments/kube-flannel.yml"
       ;;
     calico)
       dind::retry "${kubectl}" --context "$ctx" apply -f https://docs.projectcalico.org/v2.6/getting-started/kubernetes/installation/hosted/kubeadm/1.6/calico.yaml
