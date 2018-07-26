@@ -686,6 +686,12 @@ function dind::ensure-vpn {
   # TODO: this might be doable with iptables without having to set a fixed ip address and NAT but I don't know how, iptables doesn't forward
   # packets that have the destination of the tunnel interface ip itself. The only way to move them onto eth0 is by rewriting the destination
   docker exec "${vpn_name}" iptables -t nat -A PREROUTING -d ${vpn_ip} -j DNAT --to-destination ${target_ip}
+
+  # NAT hairpin to self.
+  # When a packet from the DinD container has to end up to itself it will end up with the same source and destination
+  # because the destination is rewritten by the prerouting rule. The source needs to be changed or the DinD container will reject
+  # the packet
+  docker exec "${vpn_name}" iptables -A POSTROUTING -t nat -s ${target_ip} -d ${target_ip} -o eth0 -j SNAT --to ${vpn_ip}
 }
 
 function dind::get-vpn-ip {

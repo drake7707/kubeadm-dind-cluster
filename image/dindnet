@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+ 
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -103,8 +103,10 @@ EOF
 function dind::setup-vpn-route {
   # Add the route so everything on the VPN subnet goes to the VPN container
   ip r r ${VPN_SUBNET:-} via ${VPN_CONTAINER_IP:-} dev eth0
-  # Add the assigned VPN ip to the eth0 so any request on that ip goes to localhost
-  ip address add ${VPN_IP:-} dev eth0
+  # Add the assigned VPN ip to dummy veth0 for flannel
+  ip link add veth0 type veth peer name veth1
+  ip addr add ${VPN_IP:-} dev veth0
+  ip link set veth0 up
 }
 
 # ******************** START ********************

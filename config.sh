@@ -38,7 +38,7 @@ NUM_NODES=0
 
 # Use prebuilt DIND image
 #DIND_IMAGE="${DIND_IMAGE:-mirantis/kubeadm-dind-cluster:v1.11}"
-DIND_IMAGE="${DIND_IMAGE:-idlabfuse/kubeadm-dind-cluster:v1.11}"
+DIND_IMAGE="${DIND_IMAGE:-10.10.127.48:5000/idlabfuse/kubeadm-dind-cluster:v1.11}"
 DIND_SKIP_PULL=y
 
 # Set to non-empty string to enable building kubeadm
