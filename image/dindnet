@@ -109,8 +109,18 @@ function dind::setup-vpn-route {
   ip link set veth0 up
 }
 
+function dind::fix-udp-checksum {
+  # For some yet unknown reason all the udp packets that go through end up with an invalid checksum 0xffff
+  # Not really sure what the cause is but because of it all the packets were dropped at the vpn tun0 -> eth0
+  # which meant that DNS didn't work at all. 
+  # When doing nxlookup on the kube-dns pod ip directly it worked without issue, but doing nxlookup on the cluster ip gave 0xffff checksum
+  # This rule fills in the correct checksum
+  iptables -A POSTROUTING -t mangle -o eth0 -p udp -j CHECKSUM --checksum-fill
+}
+
 # ******************** START ********************
 dind::setup-vpn-route
+dind::fix-udp-checksum
 
 get_ipv4_info eth0
 if [[ "${IP_MODE}" = "ipv6" ]]; then
