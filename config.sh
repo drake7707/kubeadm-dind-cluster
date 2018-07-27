@@ -6,14 +6,25 @@ else
     DIND_SUBNET="${DIND_SUBNET:-fd00:10::}"
 fi
 
-VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-/home/dwight/kube4.ovpn}
+
+# vpn config for both
+VPN_SUBNET=192.168.254.0/24
+
+# vpn config for master
+HOST_VPN_SERVER=y
+VPN_SERVER_IMAGE=${VPN_SERVER_IMAGE:-idlabfuse/openvpn-server}
+VPN_KEYSIZE=512
+VPN_PUBLIC_IP=${VPN_PUBLIC_IP:-10.10.127.41}
+VPN_PUBLIC_PORT=${VPN_PUBLIC_PORT:-443}
+
 VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client}
-# TODO this can be inferred from the openvpn container
-VPN_SUBNET=192.168.255.0/24
+
+# if master hosts the vpn server then this is not necessary for the master
+VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-/home/dwight/kube4.ovpn}
+
+
 
 REMOTE_DNS64_V4SERVER=8.8.8.8
-
-
 
 
 # Image repository for kube adm to pull images such as control plane from

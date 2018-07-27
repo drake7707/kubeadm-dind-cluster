@@ -107,7 +107,8 @@ else
 fi
 
 vpn_container_ip="${dind_ip_base}2"
-kube_master_ip="${dind_ip_base}3"
+kube_master_ip="${dind_ip_base}4"
+vpn_server_container_ip="${dind_ip_base}3"
 
 POD_NETWORK_CIDR="${POD_NETWORK_CIDR:-${DEFAULT_POD_NETWORK_CIDR}}"
 if [[ ${IP_MODE} = "ipv6" ]]; then
@@ -153,6 +154,8 @@ NUM_NODES=${NUM_NODES:-2}
 EXTRA_PORTS="${EXTRA_PORTS:-}"
 LOCAL_KUBECTL_VERSION=${LOCAL_KUBECTL_VERSION:-}
 KUBECTL_DIR="${KUBECTL_DIR:-${HOME}/.kubeadm-dind-cluster}"
+VPN_SERVER_DATA_DIR="${VPN_SERVER_DATA_DIR:-${HOME}/.kubeadm-dind-cluster/openvpn-server-data}"
+
 #DASHBOARD_URL="${DASHBOARD_URL:-https://rawgit.com/kubernetes/dashboard/bfab10151f012d1acc5dfb1979f3172e2400aa3c/src/deploy/kubernetes-dashboard.yaml}"
 SKIP_SNAPSHOT="${SKIP_SNAPSHOT:-}"
 E2E_REPORT_DIR="${E2E_REPORT_DIR:-}"
@@ -592,6 +595,40 @@ function dind::ensure-nat {
     fi
 }
 
+
+function helper::ip2int()
+{
+    local a b c d
+    { IFS=. read a b c d; } <<< $1
+    echo $(((((((a << 8) | b) << 8) | c) << 8) | d))
+}
+
+function helper::int2ip()
+{
+    local ui32=$1; shift
+    local ip n
+    ip=
+    for n in 1 2 3 4; do
+        ip=$((ui32 & 0xff))${ip:+.}$ip
+        ui32=$((ui32 >> 8))
+    done
+    echo $ip
+}
+
+
+function helper::netmask()
+{
+    local mask=$((0xffffffff << (32 - $1))); shift
+    helper::int2ip $mask
+}
+
+function helper::network()
+{
+    local addr=$(helper::ip2int $1); shift
+    local mask=$((0xffffffff << (32 -$1))); shift
+    helper::int2ip $((addr & mask))
+}
+
 function dind::run-vpn {
   local container_name="${1:-}"
   local ip="${2:-}"
@@ -627,31 +664,96 @@ function dind::run-vpn {
 }
 
 
-function helper::ip2int()
-{
-    local a b c d
-    { IFS=. read a b c d; } <<< $1
-    echo $(((((((a << 8) | b) << 8) | c) << 8) | d))
+function dind::run-vpn-server {
+  local container_name="${1:-}"
+  local ip="${2:-}"
+
+  local ip_arg="--ip"
+  if [[ ${IP_MODE} = "ipv6" ]]; then
+      ip_arg="--ip6"
+  fi
+  if [[ $# -gt 2 ]]; then
+    shift 2
+  else
+    shift $#
+  fi
+
+  # remove any previously created containers with the same name
+  docker rm -vf "${container_name}" >&/dev/null || true
+  
+  dind::ensure-network
+
+  dind::step "Starting VPN server container:" "${container_name}"
+
+  echo "${VPN_SUBNET}"
+  IFS='/' read -ra vpn_network_parts <<< "${VPN_SUBNET}"
+  
+  vpn_subnet_mask="$(helper::netmask ${vpn_network_parts[1]})"
+
+  mkdir -p "${VPN_SERVER_DATA_DIR}"
+
+  docker run -d \
+  --name "${container_name}" \
+  --hostname "${container_name}" \
+  --cap-add=NET_ADMIN \
+  --device /dev/net/tun \
+  --net "$(dind::net-name)" \
+  --restart=unless-stopped \
+  -e VPN_KEYSIZE=${VPN_KEYSIZE:-2048} \
+  -e VPN_SUBNET=${vpn_network_parts[0]} \
+  -e VPN_SUBNETMASK=${vpn_subnet_mask} \
+  -l "${DIND_LABEL}" \
+  -v ${DIND_ROOT}/openvpn-config:/config \
+  -v ${VPN_SERVER_DATA_DIR}:/data \
+  -p ${VPN_PUBLIC_PORT}:1194 \
+  "${ip_arg}" "${ip}" \
+  "${VPN_SERVER_IMAGE}"
 }
 
-function helper::int2ip()
-{
-    local ui32=$1; shift
-    local ip n
-    for n in 1 2 3 4; do
-        ip=$((ui32 & 0xff))${ip:+.}$ip
-        ui32=$((ui32 >> 8))
-    done
-    echo $ip
+function dind::ensure-vpn-server {
+  local vpn_container_id
+  vpn_server_name="$(dind::vpn-server-name)"
+  vpn_container_id=$(dind::run-vpn-server "${vpn_server_name}" "${vpn_server_container_ip}")
+
+  local n=3
+  local ntries=60
+  while true; do
+
+    vpn_ip=$(dind::get-vpn-ip ${vpn_server_name})
+    
+    if [[ "$vpn_ip" ]]; then
+      if ((--n == 0)); then
+        echo "[done]" >&2
+        break
+      fi
+    else
+      n=3
+    fi
+    if ((--ntries == 0)); then
+      echo "Error waiting for vpn to establish connection"
+      exit 1
+    fi
+    echo -n "." >&2
+    sleep 1
+  done
 }
 
-function helper::network()
-{
-    local addr=$(helper::ip2int $1); shift
-    local mask=$((0xffffffff << (32 -$1))); shift
-    helper::int2ip $((addr & mask))
+function dind::build-vpn-client-profile {
+  client_name=$1
+  
+  docker run \
+  -e VPN_SERVER=${VPN_PUBLIC_IP} \
+  -e VPN_SERVER_PORT=${VPN_PUBLIC_PORT} \
+  -l "${DIND_LABEL}" \
+  -v ${DIND_ROOT}/openvpn-config:/config \
+  -v ${VPN_SERVER_DATA_DIR}:/data \
+  "${VPN_SERVER_IMAGE}" /service/build_client ${client_name}
 }
 
+function dind::get-vpn-client-profile-file {
+  client_name=$1
+  echo "${VPN_SERVER_DATA_DIR}/clients/${client_name}.conf"
+}
 
 function dind::ensure-vpn {
   local target_ip=$1
@@ -664,7 +766,7 @@ function dind::ensure-vpn {
   local ntries=60
   while true; do
 
-    vpn_ip=$(dind::get-vpn-ip)
+    vpn_ip=$(dind::get-vpn-ip ${vpn_name})
     
     if [[ "$vpn_ip" ]]; then
       if ((--n == 0)); then
@@ -695,8 +797,9 @@ function dind::ensure-vpn {
 }
 
 function dind::get-vpn-ip {
-  vpn_name="$(dind::vpn-name)"
-  vpn_ip=$((docker exec "${vpn_name}" ip addr show tun0 | grep -oP "(?<=inet ).*(?=/)" | cut -d ' ' -f 1) || true)
+  vpn_name=$1;
+  
+  vpn_ip=$((docker exec "${vpn_name}" ip addr show tun0 2>/dev/null | grep -oP "(?<=inet ).*(?=/)" | cut -d ' ' -f 1) || true)
   echo $vpn_ip
 }
 
@@ -931,6 +1034,15 @@ function dind::init {
       local_host="${APISERVER_BINDIP:-[::1]}"
   fi
 
+  #Start VPN server container first if needed
+  if [[ ${HOST_VPN_SERVER} ]]; then
+    dind::ensure-vpn-server
+    dind::build-vpn-client-profile "master"
+    #set up the config file to the created file for the master
+    VPN_CONFIG_FILE="$(dind::get-vpn-client-profile-file master)"
+  fi
+
+
   local master_name container_id
   master_name="$(dind::master-name)"
   container_id=$(dind::run "${master_name}" "${kube_master_ip}" 1 ${local_host}:${APISERVER_PORT}:${INTERNAL_APISERVER_PORT} ${master_opts[@]+"${master_opts[@]}"})
@@ -1000,7 +1112,8 @@ function dind::init {
   fi
 
   #let kubernetes listen on the vpn
-  MASTER_ADVERTISE_IP="$(dind::get-vpn-ip)"
+  master_vpn_name=$(dind::vpn-name)
+  MASTER_ADVERTISE_IP="$(dind::get-vpn-ip ${master_vpn_name})"
 
   docker exec -i "$master_name" bash <<EOF
 sed -e "s|{{API_VERSION}}|${api_version}|" \
@@ -1033,6 +1146,28 @@ EOF
   fi
   kubeadm_join_flags="$(dind::kubeadm "${container_id}" init "${init_args[@]}" --skip-preflight-checks "$@" | grep '^ *kubeadm join' | sed 's/^ *kubeadm join //')"
   dind::configure-kubectl
+}
+
+function dind::get-new-worker-number {
+  highest_number=$(ls ${VPN_SERVER_DATA_DIR}/clients/ | grep -oE "[0-9]+" | sort -rn | head -n1)
+  if [[ -z ${highest_number} ]]; then 
+    echo 0
+  else 
+    ((highest_number++))
+    echo $highest_number
+  fi
+}
+
+function dind::prepare-worker {
+  dind::step "Preparing new worker"
+
+  worker_number=$(dind::get-new-worker-number)
+
+  # prepares for a worker to join, by creating a client profile in the vpn server
+  dind::build-vpn-client-profile "worker-${worker_number}"
+  cat $(dind::get-vpn-client-profile-file "worker-${worker_number}")
+  
+  dind::step "Worker ready, use worker number ${worker_number}"
 }
 
 function dind::create-node-container {
@@ -1457,7 +1592,16 @@ function dind::node-name {
 }
 
 function dind::vpn-name {
-  echo "kube-vpn$( dind::clusterSuffix )"
+  name=${1:-}
+  if [[ -z ${name} ]]; then
+    echo "kube-vpn$( dind::clusterSuffix )"
+  else
+    echo "kube-${name}-vpn$( dind::clusterSuffix )"
+  fi
+}
+
+function dind::vpn-server-name {
+  echo "kube-vpn-server$( dind::clusterSuffix )"
 }
 
 function dind::clusterSuffix {
@@ -1565,6 +1709,10 @@ function dind::clean {
   net_name="$(dind::net-name)"
   if docker network inspect "$net_name" >&/dev/null; then
     docker network rm "$net_name"
+  fi
+
+  if [[ -d "${VPN_SERVER_DATA_DIR}" ]]; then
+    rm -rf ${VPN_SERVER_DATA_DIR}
   fi
 }
 
@@ -1824,6 +1972,9 @@ case "${1:-}" in
   split-dump64)
     dind::split-dump64
     ;;
+  prepare-worker) 
+    dind::prepare-worker
+    ;;
   *)
     echo "usage:" >&2
     echo "  $0 up" >&2
@@ -1840,6 +1991,7 @@ case "${1:-}" in
     echo "  $0 dump64" >&2
     echo "  $0 split-dump" >&2
     echo "  $0 split-dump64" >&2
+    echo "  $0 prepare-worker worker-number" >&2
     exit 1
     ;;
 esac
