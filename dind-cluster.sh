@@ -155,6 +155,7 @@ EXTRA_PORTS="${EXTRA_PORTS:-}"
 LOCAL_KUBECTL_VERSION=${LOCAL_KUBECTL_VERSION:-}
 KUBECTL_DIR="${KUBECTL_DIR:-${HOME}/.kubeadm-dind-cluster}"
 VPN_SERVER_DATA_DIR="${VPN_SERVER_DATA_DIR:-${HOME}/.kubeadm-dind-cluster/openvpn-server-data}"
+SERVER_DATA_DIR="${SERVER_DATA_DIR:-${HOME}/.kubeadm-dind-cluster/server-data}"
 
 #DASHBOARD_URL="${DASHBOARD_URL:-https://rawgit.com/kubernetes/dashboard/bfab10151f012d1acc5dfb1979f3172e2400aa3c/src/deploy/kubernetes-dashboard.yaml}"
 SKIP_SNAPSHOT="${SKIP_SNAPSHOT:-}"
@@ -1159,15 +1160,26 @@ function dind::get-new-worker-number {
 }
 
 function dind::prepare-worker {
-  dind::step "Preparing new worker"
+  
+
+  if [[ ${1:-} != "output-for-api" ]]; then
+    dind::step "Preparing new worker"
+  fi
 
   worker_number=$(dind::get-new-worker-number)
 
   # prepares for a worker to join, by creating a client profile in the vpn server
   dind::build-vpn-client-profile "worker-${worker_number}"
-  cat $(dind::get-vpn-client-profile-file "worker-${worker_number}")
   
-  dind::step "Worker ready, use worker number ${worker_number}"
+  if [[ ${1:-} != "output-for-api" ]]; then
+    cat $(dind::get-vpn-client-profile-file "worker-${worker_number}")
+    dind::step "Worker ready, use worker number ${worker_number}"
+  fi
+
+  if [[ ${1:-} == "output-for-api" ]]; then
+      echo "WORKER_NUMBER=${worker_number}"
+      echo "WORKER_VPN_CLIENT_CONFIG=$(dind::get-vpn-client-profile-file worker-${worker_number})"
+  fi
 }
 
 function dind::create-node-container {
@@ -1403,6 +1415,22 @@ function dind::wait-for-ready {
   dind::step "Access dashboard at:" "http://${local_host}:${APISERVER_PORT}/api/v1/namespaces/kube-system/services/kubernetes-dashboard:/proxy"
 
   dind::step "Join nodes with the following args: " ${kubeadm_join_flags}
+
+  mkdir -p ${SERVER_DATA_DIR}
+  # write the join statement to the server data dir
+  echo -n "${kubeadm_join_flags}" > ${SERVER_DATA_DIR}/join_statement
+  
+  parts=(${kubeadm_join_flags})
+  token=
+  for i in "${!parts[@]}"; do
+    if [[ ${parts[i]} == "--token" ]]; then
+        token="${parts[((i+1))]}"
+        break
+    fi
+  done
+
+  # write the token to the server data dir
+  echo -n "${token}" > ${SERVER_DATA_DIR}/token
 }
 
 function dind::up {
@@ -1714,6 +1742,10 @@ function dind::clean {
   if [[ -d "${VPN_SERVER_DATA_DIR}" ]]; then
     rm -rf ${VPN_SERVER_DATA_DIR}
   fi
+
+  if [[ -d "${SERVER_DATA_DIR}" ]]; then
+    rm -rf ${SERVER_DATA_DIR}
+  fi
 }
 
 function dind::copy-image {
@@ -1973,7 +2005,8 @@ case "${1:-}" in
     dind::split-dump64
     ;;
   prepare-worker) 
-    dind::prepare-worker
+    shift
+    dind::prepare-worker "$@"
     ;;
   *)
     echo "usage:" >&2
@@ -1991,7 +2024,7 @@ case "${1:-}" in
     echo "  $0 dump64" >&2
     echo "  $0 split-dump" >&2
     echo "  $0 split-dump64" >&2
-    echo "  $0 prepare-worker worker-number" >&2
+    echo "  $0 prepare-worker [--output-for-api]" >&2
     exit 1
     ;;
 esac
