@@ -1,0 +1,48 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: fuse-dummy
+  namespace: default
+  labels:
+    fuse: dummy
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: fuse-dummy
+    spec:
+      containers:
+      - name: fuse-dummy
+        image: 10.10.127.48:5000/idlabfuse/fuse-dummy:v0.0.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: 
+                - fuse-dummy
+            topologyKey: kubernetes.io/hostname
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: fuse-dummy-service
+  namespace: default
+  labels:
+    fuse: dummy
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 31888
+    protocol: TCP
+  selector:
+    app: fuse-dummy
