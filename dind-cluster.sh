@@ -1782,7 +1782,9 @@ case "${1:-}" in
     shift
     dind::prepare-sys-mounts
     dind::ensure-kubectl
-    dind::join "$(dind::create-node-container)" "$@"
+    # Nodes in kubernetes must have unique names so their number must be unique. A node number can be specified through NODE_NUMBER environment variable
+    node_number=${WORKER_NODE_NUMBER:-}
+    dind::join "$(dind::create-node-container ${node_number})" "$@"
     ;;
   # bare)
   #   shift

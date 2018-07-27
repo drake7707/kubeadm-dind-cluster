@@ -31,7 +31,11 @@ APISERVER_BINDIP=0.0.0.0
 # In case of NUM_NODES=0 'node-role.kubernetes.io/master' taint is removed
 # from the master node.
 #NUM_NODES=${NUM_NODES:-2}
+# This must be on 0, local worker nodes are not supported because they would need to share the VPN
 NUM_NODES=0
+
+# Make sure that each worker that joins the cluster gets assigned an unique number
+WORKER_NODE_NUMBER=${WORKER_NODE_NUMBER:-0}
 
 # Use non-dockerized build
 # KUBEADM_DIND_LOCAL=
