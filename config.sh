@@ -23,6 +23,8 @@ VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client}
 VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-/home/dwight/kube4.ovpn}
 
 
+API_SERVER_IMAGE=${API_SERVER_IMAGE:-idlabfuse/fuse-api-server}
+
 
 REMOTE_DNS64_V4SERVER=8.8.8.8
 

@@ -23,7 +23,10 @@ if [ $(uname) = Darwin ]; then
 else
   readlinkf(){ readlink -f "$1"; }
 fi
-DIND_ROOT="$(cd $(dirname "$(readlinkf "${BASH_SOURCE}")"); pwd)"
+
+if [[ -z "${DIND_ROOT}" ]]; then
+  DIND_ROOT="$(cd $(dirname "$(readlinkf "${BASH_SOURCE}")"); pwd)"
+fi
 
 RUN_ON_BTRFS_ANYWAY="${RUN_ON_BTRFS_ANYWAY:-}"
 if [[ ! ${RUN_ON_BTRFS_ANYWAY} ]] && docker info| grep -q '^Storage Driver: btrfs'; then
@@ -55,7 +58,9 @@ fi
 
 IP_MODE="${IP_MODE:-ipv4}"  # ipv4, ipv6, (future) dualstack
 if [[ ! ${EMBEDDED_CONFIG:-} ]]; then
-  source "${DIND_ROOT}/config.sh"
+  if [ -f "${DIND_ROOT}/config.sh" ]; then
+    source "${DIND_ROOT}/config.sh"
+  fi
 fi
 
 CNI_PLUGIN="${CNI_PLUGIN:-bridge}"
@@ -154,7 +159,6 @@ NUM_NODES=${NUM_NODES:-2}
 EXTRA_PORTS="${EXTRA_PORTS:-}"
 LOCAL_KUBECTL_VERSION=${LOCAL_KUBECTL_VERSION:-}
 KUBECTL_DIR="${KUBECTL_DIR:-${HOME}/.kubeadm-dind-cluster}"
-VPN_SERVER_DATA_DIR="${VPN_SERVER_DATA_DIR:-${HOME}/.kubeadm-dind-cluster/openvpn-server-data}"
 SERVER_DATA_DIR="${SERVER_DATA_DIR:-${HOME}/.kubeadm-dind-cluster/server-data}"
 
 #DASHBOARD_URL="${DASHBOARD_URL:-https://rawgit.com/kubernetes/dashboard/bfab10151f012d1acc5dfb1979f3172e2400aa3c/src/deploy/kubernetes-dashboard.yaml}"
@@ -691,7 +695,7 @@ function dind::run-vpn-server {
   
   vpn_subnet_mask="$(helper::netmask ${vpn_network_parts[1]})"
 
-  mkdir -p "${VPN_SERVER_DATA_DIR}"
+  mkdir -p "${SERVER_DATA_DIR}/vpn"
 
   docker run -d \
   --name "${container_name}" \
@@ -705,7 +709,7 @@ function dind::run-vpn-server {
   -e VPN_SUBNETMASK=${vpn_subnet_mask} \
   -l "${DIND_LABEL}" \
   -v ${DIND_ROOT}/openvpn-config:/config \
-  -v ${VPN_SERVER_DATA_DIR}:/data \
+  -v ${SERVER_DATA_DIR}/vpn:/data \
   -p ${VPN_PUBLIC_PORT}:1194 \
   "${ip_arg}" "${ip}" \
   "${VPN_SERVER_IMAGE}"
@@ -747,13 +751,18 @@ function dind::build-vpn-client-profile {
   -e VPN_SERVER_PORT=${VPN_PUBLIC_PORT} \
   -l "${DIND_LABEL}" \
   -v ${DIND_ROOT}/openvpn-config:/config \
-  -v ${VPN_SERVER_DATA_DIR}:/data \
+  -v ${SERVER_DATA_DIR}/vpn:/data \
   "${VPN_SERVER_IMAGE}" /service/build_client ${client_name}
 }
 
 function dind::get-vpn-client-profile-file {
   client_name=$1
-  echo "${VPN_SERVER_DATA_DIR}/clients/${client_name}.conf"
+  if [[ ${2:-} == "from-container" ]]; then
+    # if it's for a container then return /data as base path
+    echo "/data/vpn/clients/${client_name}.conf"
+  else
+    echo "${SERVER_DATA_DIR}/vpn/clients/${client_name}.conf"
+  fi
 }
 
 function dind::ensure-vpn {
@@ -803,6 +812,42 @@ function dind::get-vpn-ip {
   vpn_ip=$((docker exec "${vpn_name}" ip addr show tun0 2>/dev/null | grep -oP "(?<=inet ).*(?=/)" | cut -d ' ' -f 1) || true)
   echo $vpn_ip
 }
+
+function dind::run-api-server {
+  #Runs the api server endpoint that accepts connections for joining the cluster
+  local container_name="${1:-}"
+  local ip="${2:-}"
+
+  local ip_arg="--ip"
+  if [[ ${IP_MODE} = "ipv6" ]]; then
+      ip_arg="--ip6"
+  fi
+  if [[ $# -gt 2 ]]; then
+    shift 2
+  else
+    shift $#
+  fi
+
+  # remove any previously created containers with the same name
+  docker rm -vf "${container_name}" >&/dev/null || true
+  
+  dind::ensure-network
+
+  dind::step "Starting API Server container:" "${container_name}"
+
+  mkdir -p "${SERVER_DATA_DIR}"
+
+  docker run -d \
+  --name "${container_name}" \
+  --hostname "${container_name}" \
+  --net "$(dind::net-name)" \
+  --restart=unless-stopped \
+  -l "${DIND_LABEL}" \
+  -v ${SERVER_DATA_DIR}:/data \
+  "${ip_arg}" "${ip}" \
+  "${API_SERVER_IMAGE}"
+}
+
 
 function dind::run {
   local reuse_volume=
@@ -1150,7 +1195,7 @@ EOF
 }
 
 function dind::get-new-worker-number {
-  highest_number=$(ls ${VPN_SERVER_DATA_DIR}/clients/ | grep -oE "[0-9]+" | sort -rn | head -n1)
+  highest_number=$(ls ${SERVER_DATA_DIR}/vpn/clients/ | grep -oE "[0-9]+" | sort -rn | head -n1)
   if [[ -z ${highest_number} ]]; then 
     echo 0
   else 
@@ -1178,7 +1223,8 @@ function dind::prepare-worker {
 
   if [[ ${1:-} == "output-for-api" ]]; then
       echo "WORKER_NUMBER=${worker_number}"
-      echo "WORKER_VPN_CLIENT_CONFIG=$(dind::get-vpn-client-profile-file worker-${worker_number})"
+      # api server is running in a container so pass from-container so the base folder is /data
+      echo "WORKER_VPN_CLIENT_CONFIG=$(dind::get-vpn-client-profile-file worker-${worker_number} from-container)"
   fi
 }
 
@@ -1737,10 +1783,6 @@ function dind::clean {
   net_name="$(dind::net-name)"
   if docker network inspect "$net_name" >&/dev/null; then
     docker network rm "$net_name"
-  fi
-
-  if [[ -d "${VPN_SERVER_DATA_DIR}" ]]; then
-    rm -rf ${VPN_SERVER_DATA_DIR}
   fi
 
   if [[ -d "${SERVER_DATA_DIR}" ]]; then
