@@ -839,6 +839,16 @@ function dind::run-api-server {
 
   mkdir -p "${SERVER_DATA_DIR}"
 
+
+  # if there is no crt & key file specified then use the crt & key generated for the openvpn server
+  if [[ -z ${API_CRT_FILE:-} ]]; then
+    API_CRT_FILE=${SERVER_DATA_DIR}/vpn/pki/issued/openvpn-server.crt
+  fi
+
+  if [[ -z ${API_KEY_FILE:-} ]]; then
+    API_KEY_FILE=${SERVER_DATA_DIR}/vpn/pki/private/openvpn-server.key
+  fi
+
   # pass the dind root as environment variable because docker is used on the host, not from the container
   # so the correct host paths have to be passed through and not inferred inside the container
 
@@ -851,6 +861,12 @@ function dind::run-api-server {
   -l "${DIND_LABEL}" \
   -e DIND_ROOT="${DIND_ROOT}" \
   -e SERVER_DATA_DIR="${SERVER_DATA_DIR}" \
+  -e CRT_FILE="${API_CRT_FILE}" \
+  -e KEY_FILE="${API_KEY_FILE}" \
+  -v "${DIND_ROOT}":"${DIND_ROOT}" \
+  -v "${SERVER_DATA_DIR}":"${SERVER_DATA_DIR}" \
+  -v "${API_CRT_FILE}":"${API_CRT_FILE}" \
+  -v "${API_KEY_FILE}":"${API_KEY_FILE}" \
   -v "${DIND_ROOT}":"${DIND_ROOT}" \
   -v "${SERVER_DATA_DIR}":"${SERVER_DATA_DIR}" \
   -v /var/run/docker.sock:/var/run/docker.sock \

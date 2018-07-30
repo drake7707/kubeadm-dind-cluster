@@ -27,6 +27,10 @@ API_SERVER_IMAGE=${API_SERVER_IMAGE:-idlabfuse/fuse-api-server}
 # also run the api server container so workers can join based on the token alone
 HOST_API_SERVER=y
 
+# The api server hosts a https endpoint and if the certificate & private key is left empty it will use the crt & key generated for the openvpn server
+API_CRT_FILE=
+API_KEY_FILE=
+
 REMOTE_DNS64_V4SERVER=8.8.8.8
 
 
