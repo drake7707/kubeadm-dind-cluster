@@ -24,7 +24,7 @@ else
   readlinkf(){ readlink -f "$1"; }
 fi
 
-if [[ -z "${DIND_ROOT}" ]]; then
+if [[ -z "${DIND_ROOT:-}" ]]; then
   DIND_ROOT="$(cd $(dirname "$(readlinkf "${BASH_SOURCE}")"); pwd)"
 fi
 
@@ -112,8 +112,10 @@ else
 fi
 
 vpn_container_ip="${dind_ip_base}2"
-kube_master_ip="${dind_ip_base}4"
 vpn_server_container_ip="${dind_ip_base}3"
+api_server_container_ip="${dind_ip_base}4"
+kube_master_ip="${dind_ip_base}5"
+
 
 POD_NETWORK_CIDR="${POD_NETWORK_CIDR:-${DEFAULT_POD_NETWORK_CIDR}}"
 if [[ ${IP_MODE} = "ipv6" ]]; then
@@ -202,6 +204,8 @@ function dind::need-source {
 
 build_tools_dir="build"
 use_k8s_source=y
+kubectl=
+
 if [[ ! ${BUILD_KUBEADM} && ! ${BUILD_HYPERKUBE} ]]; then
   use_k8s_source=
 fi
@@ -218,6 +222,7 @@ else
   fi
   kubectl=kubectl
 fi
+
 
 function dind::retry {
   # based on retry function in hack/jenkins/ scripts in k8s source
@@ -668,7 +673,6 @@ function dind::run-vpn {
   "${VPN_IMAGE}"
 }
 
-
 function dind::run-vpn-server {
   local container_name="${1:-}"
   local ip="${2:-}"
@@ -697,6 +701,7 @@ function dind::run-vpn-server {
 
   mkdir -p "${SERVER_DATA_DIR}/vpn"
 
+  # set the portshare target to the api server so all non openvpn traffic goes to the api server
   docker run -d \
   --name "${container_name}" \
   --hostname "${container_name}" \
@@ -707,6 +712,8 @@ function dind::run-vpn-server {
   -e VPN_KEYSIZE=${VPN_KEYSIZE:-2048} \
   -e VPN_SUBNET=${vpn_network_parts[0]} \
   -e VPN_SUBNETMASK=${vpn_subnet_mask} \
+  -e VPN_PORTSHARE_TARGET=${api_server_container_ip} \
+  -e VPN_PORTSHARE_TARGETPORT=8000 \
   -l "${DIND_LABEL}" \
   -v ${DIND_ROOT}/openvpn-config:/config \
   -v ${SERVER_DATA_DIR}/vpn:/data \
@@ -757,12 +764,7 @@ function dind::build-vpn-client-profile {
 
 function dind::get-vpn-client-profile-file {
   client_name=$1
-  if [[ ${2:-} == "from-container" ]]; then
-    # if it's for a container then return /data as base path
-    echo "/data/vpn/clients/${client_name}.conf"
-  else
-    echo "${SERVER_DATA_DIR}/vpn/clients/${client_name}.conf"
-  fi
+  echo "${SERVER_DATA_DIR}/vpn/clients/${client_name}.conf"
 }
 
 function dind::ensure-vpn {
@@ -837,17 +839,30 @@ function dind::run-api-server {
 
   mkdir -p "${SERVER_DATA_DIR}"
 
+  # pass the dind root as environment variable because docker is used on the host, not from the container
+  # so the correct host paths have to be passed through and not inferred inside the container
+
+  # TODO don't expose the api port directly but pass it through through the openvpn server with port share
   docker run -d \
   --name "${container_name}" \
   --hostname "${container_name}" \
   --net "$(dind::net-name)" \
   --restart=unless-stopped \
   -l "${DIND_LABEL}" \
-  -v ${SERVER_DATA_DIR}:/data \
+  -e DIND_ROOT="${DIND_ROOT}" \
+  -e SERVER_DATA_DIR="${SERVER_DATA_DIR}" \
+  -v "${DIND_ROOT}":"${DIND_ROOT}" \
+  -v "${SERVER_DATA_DIR}":"${SERVER_DATA_DIR}" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   "${ip_arg}" "${ip}" \
   "${API_SERVER_IMAGE}"
 }
 
+function dind::ensure-api-server {
+  local api_container_id
+  api_server_name="$(dind::api-server-name)"
+  api_container_id=$(dind::run-api-server "${api_server_name}" "${api_server_container_ip}")
+}
 
 function dind::run {
   local reuse_volume=
@@ -1081,13 +1096,17 @@ function dind::init {
   fi
 
   #Start VPN server container first if needed
-  if [[ ${HOST_VPN_SERVER} ]]; then
+  if [[ ${HOST_VPN_SERVER:-} ]]; then
     dind::ensure-vpn-server
     dind::build-vpn-client-profile "master"
     #set up the config file to the created file for the master
     VPN_CONFIG_FILE="$(dind::get-vpn-client-profile-file master)"
   fi
 
+  #Start the API server container if needed that listens for incoming connections for workers to join the cluster
+  if [[ ${HOST_API_SERVER:-} ]]; then
+    dind::ensure-api-server
+  fi
 
   local master_name container_id
   master_name="$(dind::master-name)"
@@ -1223,8 +1242,7 @@ function dind::prepare-worker {
 
   if [[ ${1:-} == "output-for-api" ]]; then
       echo "WORKER_NUMBER=${worker_number}"
-      # api server is running in a container so pass from-container so the base folder is /data
-      echo "WORKER_VPN_CLIENT_CONFIG=$(dind::get-vpn-client-profile-file worker-${worker_number} from-container)"
+      echo "WORKER_VPN_CLIENT_CONFIG=$(dind::get-vpn-client-profile-file worker-${worker_number})"
   fi
 }
 
@@ -1676,6 +1694,10 @@ function dind::vpn-name {
 
 function dind::vpn-server-name {
   echo "kube-vpn-server$( dind::clusterSuffix )"
+}
+
+function dind::api-server-name {
+  echo "kube-api-server$( dind::clusterSuffix )"
 }
 
 function dind::clusterSuffix {

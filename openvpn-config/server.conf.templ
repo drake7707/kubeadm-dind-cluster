@@ -18,7 +18,7 @@ persist-tun
 proto tcp-server
 port 1194
 
-#port-share httpsproxy_instance 443
+port-share {{openvpn_portshare_target}} {{openvpn_portshare_targetport}}
 
 dev tun0 
 

@@ -20,11 +20,12 @@ VPN_PUBLIC_PORT=${VPN_PUBLIC_PORT:-443}
 VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client}
 
 # if master hosts the vpn server then this is not necessary for the master
-VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-/home/dwight/kube4.ovpn}
-
+VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-}
 
 API_SERVER_IMAGE=${API_SERVER_IMAGE:-idlabfuse/fuse-api-server}
 
+# also run the api server container so workers can join based on the token alone
+HOST_API_SERVER=y
 
 REMOTE_DNS64_V4SERVER=8.8.8.8
 
