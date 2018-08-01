@@ -17,6 +17,9 @@ set -o errexit
 set -o nounset
 set -o pipefail
 set -o errtrace
+set -x
+#ARCH=amd64 or arm
+ARCH=${ARCH:-amd64}
 
 DIND_ROOT=$(dirname "${BASH_SOURCE}")/..
 source "$DIND_ROOT/build/funcs.sh"
@@ -33,6 +36,6 @@ kubeadm_version="${version}"
 eval "KUBEADM_URL=\${KUBEADM_URL_${version}}"
 eval "KUBEADM_SHA1=\${KUBEADM_SHA1_${version}}"
 tag="v${v}"
-cur_image="${IMAGE_NAME}:${tag}"
+cur_image="${IMAGE_NAME}-${ARCH}:${tag}"
 
 dind::build-image "${cur_image}"

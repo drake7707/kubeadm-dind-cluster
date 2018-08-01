@@ -6,23 +6,24 @@ else
     DIND_SUBNET="${DIND_SUBNET:-fd00:10::}"
 fi
 
+ARCH=arm
 
 # vpn config for both
 VPN_SUBNET=192.168.254.0/24
 
 # vpn config for master
 HOST_VPN_SERVER=y
-VPN_SERVER_IMAGE=${VPN_SERVER_IMAGE:-idlabfuse/openvpn-server}
+VPN_SERVER_IMAGE=${VPN_SERVER_IMAGE:-idlabfuse/openvpn-server-${ARCH}}
 VPN_KEYSIZE=512
 VPN_PUBLIC_IP=${VPN_PUBLIC_IP:-10.10.127.41}
 VPN_PUBLIC_PORT=${VPN_PUBLIC_PORT:-443}
 
-VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client}
+VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client-${ARCH}}
 
 # if master hosts the vpn server then this is not necessary for the master
 VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-}
 
-API_SERVER_IMAGE=${API_SERVER_IMAGE:-idlabfuse/fuse-api-server}
+API_SERVER_IMAGE=${API_SERVER_IMAGE:-idlabfuse/fuse-api-server-${ARCH}}
 
 # also run the api server container so workers can join based on the token alone
 HOST_API_SERVER=y
@@ -36,7 +37,7 @@ REMOTE_DNS64_V4SERVER=8.8.8.8
 
 # Image repository for kube adm to pull images such as control plane from
 #KUBE_IMAGE_REPOSITORY=${KUBE_IMAGE_REPOSITORY:-k8s.gcr.io}
-KUBE_IMAGE_REPOSITORY=10.10.127.48:5000
+#KUBE_IMAGE_REPOSITORY=10.10.127.48:5000
 
 # The image repository is insecure, so make sure to add it to the /etc/docker/daemon.json
 DIND_INSECURE_REGISTRIES="[ \"10.10.127.48:5000\" ]"
@@ -59,8 +60,7 @@ WORKER_NODE_NUMBER=${WORKER_NODE_NUMBER:-0}
 # KUBEADM_DIND_LOCAL=
 
 # Use prebuilt DIND image
-#DIND_IMAGE="${DIND_IMAGE:-mirantis/kubeadm-dind-cluster:v1.11}"
-DIND_IMAGE="${DIND_IMAGE:-10.10.127.48:5000/idlabfuse/kubeadm-dind-cluster:v1.11}"
+DIND_IMAGE="${DIND_IMAGE:-idlabfuse/kubeadm-dind-cluster-${ARCH}:v1.11}"
 DIND_SKIP_PULL=y
 
 # Set to non-empty string to enable building kubeadm

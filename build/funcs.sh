@@ -32,9 +32,9 @@ HYPERKUBE_SHA1=${HYPERKUBE_SHA1:-}
 #                 gcr.io/google_containers/etcd-amd64:2.2.5
 #                 gcr.io/google_containers/etcd:2.2.1)
 
-hypokube_base_image=idlabfuse/hypokube:base
+hypokube_base_image=idlabfuse/hypokube-${ARCH}:base
 image_version_suffix=v4
-image_name="idlabfuse/kubeadm-dind-cluster"
+image_name="idlabfuse/kubeadm-dind-cluster-${ARCH}"
 BARE_IMAGE_NAME="${image_name}:bare-${image_version_suffix}"
 
 function dind::step {
@@ -54,7 +54,7 @@ function dind::step {
 
 function dind::build-hypokube {
     dind::step "Building hypokube image"
-    docker build -t ${hypokube_base_image} -f image/hypokube_base.dkr image
+    docker build -t ${hypokube_base_image} -f image/hypokube_base-${ARCH}.dkr image
 }
 
 function dind::image-archive-name {
@@ -98,7 +98,7 @@ function dind::copy-saved-images {
 }
 
 function dind::build-base {
-    docker build -t "${BARE_IMAGE_NAME}" image/
+    docker build -t "${BARE_IMAGE_NAME}" -f image/Dockerfile.${ARCH} image/
 }
 
 function dind::build-image {
@@ -110,7 +110,7 @@ function dind::build-image {
     images+=("${hypokube_base_image}")
 
     dind::copy-saved-images save.tar.lz4 "${images[@]}"
-    docker build -t "${name}" \
+    docker build -t "${name}" -f Dockerfile.${ARCH} \
            --build-arg KUBEADM_URL="${KUBEADM_URL}" \
            --build-arg KUBEADM_SHA1="${KUBEADM_SHA1}" \
            --build-arg HYPERKUBE_URL="${HYPERKUBE_URL}" \

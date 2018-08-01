@@ -438,8 +438,13 @@ function dind::ensure-downloaded-kubectl {
       ;;
     v1.11)
       full_kubectl_version=v1.11.0
-      kubectl_sha1_linux=e23f251ca0cb848802f3cb0f69a4ba297d07bfc6
-      kubectl_sha1_darwin=6eff29a328c4bc00879fd6a0c8b33690c6f75908
+      if [[ "${ARCH}" == "arm" ]]; then
+        kubectl_sha1_linux=c979e7402256630982dab8de677c5a4993121784
+        kubectl_sha1_darwin=
+      else
+        kubectl_sha1_linux=e23f251ca0cb848802f3cb0f69a4ba297d07bfc6
+        kubectl_sha1_darwin=6eff29a328c4bc00879fd6a0c8b33690c6f75908
+      fi
       ;;
     "")
       return 0
@@ -467,7 +472,7 @@ function dind::ensure-downloaded-kubectl {
   local path="${KUBECTL_DIR}/${link_target}"
   if [[ ! -f "${path}" ]]; then
     mkdir -p "${KUBECTL_DIR}"
-    curl -sSLo "${path}" "https://storage.googleapis.com/kubernetes-release/release/${full_kubectl_version}/bin/${kubectl_os}/amd64/kubectl"
+    curl -sSLo "${path}" "https://storage.googleapis.com/kubernetes-release/release/${full_kubectl_version}/bin/${kubectl_os}/${ARCH}/kubectl"
     echo "${kubectl_sha1}  ${path}" | sha1sum -c
     chmod +x "${path}"
   fi
@@ -977,6 +982,7 @@ function dind::run {
 	 -e IP_MODE="${IP_MODE}" \
          -e KUBEADM_SOURCE="${KUBEADM_SOURCE}" \
          -e HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE}" \
+         -e ARCH="${ARCH}" \
          -d --privileged \
          --net "$(dind::net-name)" \
          --dns ${REMOTE_DNS64_V4SERVER} --dns ${dns_server} \
@@ -1080,6 +1086,11 @@ function dind::ensure-dashboard-clusterrolebinding {
                -o json --dry-run |
     docker exec -i "$(dind::master-name)" jq '.apiVersion="rbac.authorization.k8s.io/v1beta1"|.kind|="ClusterRoleBinding"' |
     "${kubectl}" --context "$ctx" apply -f -
+}
+
+function dind::deploy-kube-proxy {
+  dind::step "Deploying k8s kube-proxy"
+  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DIND_ROOT}/deployments/kube-proxy.yml"
 }
 
 function dind::deploy-dashboard {
@@ -1555,6 +1566,10 @@ function dind::up {
     # FIXME: check for taint & retry if it's there
     "${kubectl}" --context "$ctx" taint nodes $(dind::master-name) node-role.kubernetes.io/master- || true
   fi
+
+  # deploy multi-arch kube-proxy, necessary for flannel
+  dind::deploy-kube-proxy
+
   case "${CNI_PLUGIN}" in
     bridge)
       dind::create-static-routes-for-bridge

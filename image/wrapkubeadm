@@ -17,12 +17,12 @@ set -o errexit
 set -o nounset
 set -o pipefail
 set -o errtrace
-
+set -x
 
 HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE:-keep://}"
 KUBEADM_SOURCE="${KUBEADM_SOURCE:-keep://}"
 
-hypokube_base_image="idlabfuse/hypokube:base"
+hypokube_base_image="idlabfuse/hypokube-${ARCH}:base"
 hypokube_final_image="idlabfuse/hypokube:final"
 build_src_dir="/go/src/k8s.io/kubernetes"
 binary_dir="/k8s"
@@ -163,7 +163,9 @@ function dind::ensure-binaries-and-hypokube {
     # It will be used for initial cluster deployment.
     # After we "frob" the cluster, the hyperkube image is taken from /k8s directory.
     cp "${hyperkube_bin}" /hypokube/
-    docker build -t "${hypokube_final_image}" -f /hypokube/hypokube.dkr /hypokube
+    docker build -t "${hypokube_final_image}" -f /hypokube/hypokube-${ARCH}.dkr /hypokube
+    # clean up to save some space
+    rm -f /hypokube/hyperkube
   fi
 }
 
@@ -241,6 +243,13 @@ function dind::frob-proxy-configmap {
   # only remove the temp dir (inside the container) if the
   # commands above have succeeded
   rm -rf "${confdir}"
+}
+
+function dind::remove-kube-proxy {
+  # remove the kube-proxy daemonset all together. For certain configurations it's not needed and kubeadm doesn't
+  # provide a way to skip creating the kube-proxy. Instead deploy the kube-proxy afterwards if it is needed
+  # for the network driver from the dind-cluster script
+  kubectl -n kube-system delete daemonset kube-proxy
 }
 
 function dind::frob-proxy {
@@ -346,10 +355,15 @@ function dind::prepare-for-kubeadm {
   start_services docker
   systemctl enable docker
 
-  if ! docker images gcr.io/google_containers/pause-amd64|grep -q 'gcr\.io/'; then
-    time lz4 -dc /save.tar.lz4 | docker load
+  # only prepare the hypokube when it's a master node
+  # the worker nodes have no need for a hypokube image anymore
+  # the only thing that was using it was kube-proxy and that is now a separate deployment
+  if [[ ${is_master} ]]; then
+    if ! docker images gcr.io/google_containers/pause-amd64|grep -q 'gcr\.io/'; then
+      time lz4 -dc /save.tar.lz4 | docker load
+    fi
+    dind::ensure-binaries-and-hypokube
   fi
-  dind::ensure-binaries-and-hypokube
 
   # Ensure that DNS drop-in is created and necessary networking is set up
   systemctl start dindnet
@@ -397,6 +411,7 @@ else
 
   if [[ ${is_master} ]]; then
     dind::frob-cluster
+    dind::remove-kube-proxy
   fi
 fi
 
