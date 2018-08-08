@@ -114,8 +114,8 @@ fi
 vpn_container_ip="${dind_ip_base}2"
 vpn_server_container_ip="${dind_ip_base}3"
 api_server_container_ip="${dind_ip_base}4"
-kube_master_ip="${dind_ip_base}5"
-
+private_registry_container_ip="${dind_ip_base}5"
+kube_master_ip="${dind_ip_base}6"
 
 POD_NETWORK_CIDR="${POD_NETWORK_CIDR:-${DEFAULT_POD_NETWORK_CIDR}}"
 if [[ ${IP_MODE} = "ipv6" ]]; then
@@ -160,7 +160,7 @@ HYPERKUBE_SOURCE="${HYPERKUBE_SOURCE-}"
 NUM_NODES=${NUM_NODES:-2}
 EXTRA_PORTS="${EXTRA_PORTS:-}"
 LOCAL_KUBECTL_VERSION=${LOCAL_KUBECTL_VERSION:-}
-KUBECTL_DIR="${KUBECTL_DIR:-${HOME}/.kubeadm-dind-cluster}"
+KUBECTL_DIR="${KUBECTL_DIR:-${DIND_ROOT}/bin}"
 SERVER_DATA_DIR="${SERVER_DATA_DIR:-${HOME}/.kubeadm-dind-cluster/server-data}"
 
 #DASHBOARD_URL="${DASHBOARD_URL:-https://rawgit.com/kubernetes/dashboard/bfab10151f012d1acc5dfb1979f3172e2400aa3c/src/deploy/kubernetes-dashboard.yaml}"
@@ -412,6 +412,12 @@ function dind::check-binary {
 }
 
 function dind::ensure-downloaded-kubectl {
+  export PATH="${KUBECTL_DIR}:$PATH"
+
+  if [[ -f "${KUBECTL_DIR}/kubectl" ]]; then
+    return
+  fi
+
   local kubectl_url
   local kubectl_sha1
   local kubectl_sha1_linux
@@ -453,8 +459,6 @@ function dind::ensure-downloaded-kubectl {
       echo "Invalid kubectl version" >&2
       exit 1
   esac
-
-  export PATH="${KUBECTL_DIR}:$PATH"
 
   if [ $(uname) = Darwin ]; then
     kubectl_sha1="${kubectl_sha1_darwin}"
@@ -699,7 +703,6 @@ function dind::run-vpn-server {
 
   dind::step "Starting VPN server container:" "${container_name}"
 
-  echo "${VPN_SUBNET}"
   IFS='/' read -ra vpn_network_parts <<< "${VPN_SUBNET}"
   
   vpn_subnet_mask="$(helper::netmask ${vpn_network_parts[1]})"
@@ -753,6 +756,37 @@ function dind::ensure-vpn-server {
     echo -n "." >&2
     sleep 1
   done
+
+  # if there is a private registry hosted, then setup a rules script to write the iptables
+  # this rules.sh is also sourced in the CMD script of the vpn server container so they are applied
+  # when the container is restarted
+  if [[ "${HOST_PRIVATE_REGISTRY:-}" == "y" ]]; then
+  
+  # write the rules. This is a double nested heredoc, everything between EOFHOST is executed interactively in the docker container
+  # once inside the container write the rules.sh and apply them. The environment variable substitution is done before the 2nd heredoc
+  # so everything will be filled in correctly
+
+  docker exec -i ${vpn_container_id} /bin/sh <<EOFHOST
+# Setting up rules script
+cat <<EOFRULES > /data/rules.sh
+# forward everything received that should go to the vpn net to the tunnel network
+iptables -A FORWARD  -p tcp --sport 5000 -i eth0 -o tun0 -j ACCEPT
+# forward everything that comes from the vpn net back to the eth0
+iptables -A FORWARD -p tcp --dport 5000 -i tun0 -o eth0 -j ACCEPT
+
+# rewrite the destination for all packets that are received on tcp:5000 on the vpn tunnel interface
+iptables -A PREROUTING -t nat -i tun0 -p tcp --dport 5000 -j DNAT --to-destination ${private_registry_container_ip}
+# rewrite the source for all packets going to the eth0 tcp:5000 or the destination will not know where to send the reply to
+iptables -A POSTROUTING -t nat -o eth0 -p tcp --dport 5000 -j SNAT --to-source ${vpn_server_container_ip}
+EOFRULES
+
+# rules.sh written
+# Applying rules now
+/bin/sh /data/rules.sh
+exit
+EOFHOST
+
+  fi
 }
 
 function dind::build-vpn-client-profile {
@@ -801,16 +835,34 @@ function dind::ensure-vpn {
     sleep 1
   done
 
-  # add a rule to forward all traffic as destination to the vpn container to the to the target ip
-  # TODO: this might be doable with iptables without having to set a fixed ip address and NAT but I don't know how, iptables doesn't forward
-  # packets that have the destination of the tunnel interface ip itself. The only way to move them onto eth0 is by rewriting the destination
-  docker exec "${vpn_name}" iptables -t nat -A PREROUTING -d ${vpn_ip} -j DNAT --to-destination ${target_ip}
+  # write the necessary iptable rules to a rules.sh file and apply them. They are written to a file so they are executed
+  # when the container restarts (otherwise they are lost)
+  docker exec -i ${vpn_container_id} /bin/sh <<EOFHOST
+# Setting up rules script
+cat <<EOFRULES > /rules.sh  
+# forward everything received that should go to the vpn net to the tunnel network 
+iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
+# forward everything that comes from the vpn net back to the eth0
+iptables -A FORWARD -i tun0 -o eth0 -j ACCEPT
+# do NAT to rewrite the source
+iptables -A POSTROUTING  -t nat -o tun0 -j MASQUERADE
 
-  # NAT hairpin to self.
-  # When a packet from the DinD container has to end up to itself it will end up with the same source and destination
-  # because the destination is rewritten by the prerouting rule. The source needs to be changed or the DinD container will reject
-  # the packet
-  docker exec "${vpn_name}" iptables -A POSTROUTING -t nat -s ${target_ip} -d ${target_ip} -o eth0 -j SNAT --to ${vpn_ip}
+# add a rule to forward all traffic as destination to the vpn container to the to the target ip (in this case the DinD container)
+iptables -t nat -A PREROUTING -d ${vpn_ip} -j DNAT --to-destination ${target_ip}
+
+# NAT hairpin to self.
+# When a packet from the DinD container has to end up to itself it will end up with the same source and destination
+# because the destination is rewritten by the prerouting rule. The source needs to be changed or the DinD container will reject
+# the packet
+iptables -A POSTROUTING -t nat -s ${target_ip} -d ${target_ip} -o eth0 -j SNAT --to ${vpn_ip}
+EOFRULES
+
+# rules.sh written
+# Applying rules now
+/bin/sh /rules.sh
+exit
+EOFHOST
+
 }
 
 function dind::get-vpn-ip {
@@ -844,7 +896,6 @@ function dind::run-api-server {
 
   mkdir -p "${SERVER_DATA_DIR}"
 
-
   # if there is no crt & key file specified then use the crt & key generated for the openvpn server
   if [[ -z ${API_CRT_FILE:-} ]]; then
     API_CRT_FILE=${SERVER_DATA_DIR}/vpn/pki/issued/openvpn-server.crt
@@ -857,7 +908,6 @@ function dind::run-api-server {
   # pass the dind root as environment variable because docker is used on the host, not from the container
   # so the correct host paths have to be passed through and not inferred inside the container
 
-  # TODO don't expose the api port directly but pass it through through the openvpn server with port share
   docker run -d \
   --name "${container_name}" \
   --hostname "${container_name}" \
@@ -868,6 +918,8 @@ function dind::run-api-server {
   -e SERVER_DATA_DIR="${SERVER_DATA_DIR}" \
   -e CRT_FILE="${API_CRT_FILE}" \
   -e KEY_FILE="${API_KEY_FILE}" \
+  -e ARCH="${ARCH}" \
+  -e VPN_PUBLIC_IP="${VPN_PUBLIC_IP}" \
   -v "${DIND_ROOT}":"${DIND_ROOT}" \
   -v "${SERVER_DATA_DIR}":"${SERVER_DATA_DIR}" \
   -v "${API_CRT_FILE}":"${API_CRT_FILE}" \
@@ -883,6 +935,62 @@ function dind::ensure-api-server {
   local api_container_id
   api_server_name="$(dind::api-server-name)"
   api_container_id=$(dind::run-api-server "${api_server_name}" "${api_server_container_ip}")
+}
+
+
+function dind::run-private-registry {
+  # Runs the private registry that can be used for getting the necessary images to set up the cluster
+  # if internet is not available
+
+ local reuse_volume=
+  if [[ ${1:-} = -r ]]; then
+    reuse_volume="-r"
+    shift
+  fi
+
+  local container_name="${1:-}"
+  local ip="${2:-}"
+
+  local ip_arg="--ip"
+  if [[ ${IP_MODE} = "ipv6" ]]; then
+      ip_arg="--ip6"
+  fi
+  if [[ $# -gt 2 ]]; then
+    shift 2
+  else
+    shift $#
+  fi
+
+  # remove any previously created containers with the same name
+  docker rm -vf "${container_name}" >&/dev/null || true
+  
+  dind::ensure-network
+
+  # set up the volume
+  registry_volume_name=kubeadm-dind-kube-registry
+  dind::step "Preparing private registry volume:" "${registry_volume_name}"
+  dind::ensure-volume ${reuse_volume} ${registry_volume_name}
+
+  # extract the tar into the volume
+  docker run --rm -v ${registry_volume_name}:/var/lib/registry -v ${PRIVATE_REGISTRY_TAR_DIR}:/backup ${busybox_image} tar -xvf /backup/${PRIVATE_REGISTRY_TAR_FILE} -C /var/lib/registry
+
+  dind::step "Starting Private registry container:" "${container_name}"
+
+  docker run -d \
+  --name "${container_name}" \
+  --hostname "${container_name}" \
+  --net "$(dind::net-name)" \
+  --restart=unless-stopped \
+  -l "${DIND_LABEL}" \
+  -v ${registry_volume_name}:/var/lib/registry \
+  "${ip_arg}" "${ip}" \
+  "${PRIVATE_REGISTRY_IMAGE}"
+}
+
+function dind::ensure-private-registry {
+  local private_registry_container_id
+  private_registry_name="$(dind::private-registry-name)"
+  private_registry_container_id=$(dind::run-private-registry "${private_registry_name}" "${private_registry_container_ip}")
 }
 
 function dind::run {
@@ -969,6 +1077,8 @@ function dind::run {
   args+=("systemd.setenv=VPN_SUBNET=${VPN_SUBNET}")
   args+=("systemd.setenv=VPN_IP=${vpn_ip}")
   args+=("systemd.setenv=VPN_CONTAINER_IP=${vpn_container_ip}")
+  # also push its own ip address so the iptable rule is properly set
+  args+=("systemd.setenv=CONTAINER_IP=${ip}")
 
   # make sure the kubelet binds its internal ip to the vpn ip
   args+=("systemd.setenv=KUBELET_EXTRA_ARGS=\"--node-ip=${vpn_ip}\"")
@@ -1090,16 +1200,30 @@ function dind::ensure-dashboard-clusterrolebinding {
 
 function dind::deploy-kube-proxy {
   dind::step "Deploying k8s kube-proxy"
-  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DIND_ROOT}/deployments/kube-proxy.yml"
+
+  tmpfile=$(mktemp /tmp/kube-proxy.XXXXXX)
+  cat "${DIND_ROOT}/deployments/kube-proxy.yml" > ${tmpfile}
+  sed -i "s/{{REGISTRY}}/${KUBE_PROXY_IMAGE_REPOSITORY}/" "${tmpfile}"
+
+  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${tmpfile}"
+
+  rm -f "${tmpfile}"
 }
 
 function dind::deploy-dashboard {
   dind::step "Deploying k8s dashboard"
   #dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DASHBOARD_URL}"
-  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${DIND_ROOT}/deployments/kube-dashboard.yml"
+
+  tmpfile=$(mktemp /tmp/kube-dashboard.XXXXXX)
+  cat "${DIND_ROOT}/deployments/kube-dashboard.yml" > ${tmpfile}
+  sed -i "s/{{REGISTRY}}/${DASHBOARD_IMAGE_REPOSITORY}/" "${tmpfile}"
+
+  dind::retry "${kubectl}" --context "$(dind::context-name)" apply -f "${tmpfile}"
   # https://kubernetes-io-vnext-staging.netlify.com/docs/admin/authorization/rbac/#service-account-permissions
   # Thanks @liggitt for the hint
   dind::retry dind::ensure-dashboard-clusterrolebinding
+
+  rm -f "${tmpfile}"
 }
 
 function dind::kubeadm-version {
@@ -1122,8 +1246,19 @@ function dind::init {
       local_host="${APISERVER_BINDIP:-[::1]}"
   fi
 
+  # Set up the private registry if needed
+  if [[ "${HOST_PRIVATE_REGISTRY:-}" == "y" ]]; then
+    dind::ensure-private-registry
+
+    # Set the repository to the VPN gateway, it will NAT to the private registry
+    KUBE_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+    DASHBOARD_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+    KUBE_PROXY_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+    FLANNEL_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+  fi
+
   #Start VPN server container first if needed
-  if [[ ${HOST_VPN_SERVER:-} ]]; then
+  if [[ "${HOST_VPN_SERVER:-}" == "y" ]]; then
     dind::ensure-vpn-server
     dind::build-vpn-client-profile "master"
     #set up the config file to the created file for the master
@@ -1131,7 +1266,7 @@ function dind::init {
   fi
 
   #Start the API server container if needed that listens for incoming connections for workers to join the cluster
-  if [[ ${HOST_API_SERVER:-} ]]; then
+  if [[ "${HOST_API_SERVER:-}" == "y" ]]; then
     dind::ensure-api-server
   fi
 
@@ -1241,7 +1376,7 @@ EOF
 }
 
 function dind::get-new-worker-number {
-  highest_number=$(ls ${SERVER_DATA_DIR}/vpn/clients/ | grep -oE "[0-9]+" | sort -rn | head -n1)
+  highest_number=$(ls ${SERVER_DATA_DIR}/vpn/clients/worker-nr-* | grep -oE "[0-9]+" | sort -rn | head -n1)
   if [[ -z ${highest_number} ]]; then 
     echo 0
   else 
@@ -1252,24 +1387,68 @@ function dind::get-new-worker-number {
 
 function dind::prepare-worker {
   
+  local machineID=${1:-}
 
-  if [[ ${1:-} != "output-for-api" ]]; then
-    dind::step "Preparing new worker"
+  if [[ ${2:-} != "output-for-api" ]]; then
+    dind::step "Preparing new worker with machine id ${machineID}"
   fi
 
-  worker_number=$(dind::get-new-worker-number)
+  # it's best that all devices specify a machine id so they get matched when they do join multiple times
+  # but it's entirely possible that some nodes won't have a ready to use machine id so fallback to node numbering
+  if [[ -z ${machineID} ]]; then
+    worker_id="nr-$(dind::get-new-worker-number)"
+  else
+    # prefix it with id so it doesn't get picked up with the numbers
+    worker_id="${machineID}"
+  fi
 
   # prepares for a worker to join, by creating a client profile in the vpn server
-  dind::build-vpn-client-profile "worker-${worker_number}"
-  
-  if [[ ${1:-} != "output-for-api" ]]; then
-    cat $(dind::get-vpn-client-profile-file "worker-${worker_number}")
-    dind::step "Worker ready, use worker number ${worker_number}"
+  local profile_name="worker-${worker_id}"
+  local profile_file=$(dind::get-vpn-client-profile-file ${profile_name})
+
+  if [[ ! -f ${profile_file} ]]; then
+    dind::build-vpn-client-profile ${profile_name}
   fi
 
-  if [[ ${1:-} == "output-for-api" ]]; then
-      echo "WORKER_NUMBER=${worker_number}"
-      echo "WORKER_VPN_CLIENT_CONFIG=$(dind::get-vpn-client-profile-file worker-${worker_number})"
+  if [[ ${2:-} != "output-for-api" ]]; then
+    cat ${profile_file}
+    dind::step "Worker ready, use worker number ${worker_id}"
+  fi
+
+  if [[ ${2:-} == "output-for-api" ]]; then
+      echo "WORKER_ID=${worker_id}"
+      echo "WORKER_VPN_CLIENT_CONFIG=${profile_file}"
+  fi
+}
+
+
+function dind::prepare-client {
+  # prepares a generic client, not a worker by setting up a vpn profile if it doesn't exist yet
+  local name=${1:-}
+  if [[ -z ${name} ]]; then
+    echo "No name was specified" 1>&2
+    exit 1
+  fi
+
+  if [[ ${2:-} != "output-for-api" ]]; then
+    dind::step "Preparing new client"
+  fi
+
+  local profile_name="client-${name}"
+
+  local profile_file=$(dind::get-vpn-client-profile-file ${profile_name})
+
+  if [[ ! -f ${profile_file} ]]; then
+    # prepares for a client to join, by creating a client profile in the vpn server
+    dind::build-vpn-client-profile ${profile_name}
+  fi
+
+  if [[ ${2:-} != "output-for-api" ]]; then
+    cat ${profile_file}
+  fi
+
+  if [[ ${2:-} == "output-for-api" ]]; then
+      echo "CLIENT_VPN_CLIENT_CONFIG=${profile_file}"
   fi
 }
 
@@ -1299,6 +1478,42 @@ function dind::create-node-container {
   dind::run ${reuse_volume} "$node_name" ${node_ip} $((next_node_index + 1)) "${EXTRA_PORTS}" ${opts[@]+"${opts[@]}"}
 }
 
+function dind::create-worker-container {
+  # copied from the create-node-container, but with a fixed node number because the node_id can be 
+  # a machine id and not just a number
+  # The node number is used to set up the POD_PREFIX which in turn is used for setting up the bridge networking
+  # if another CNI plugin is used all of this is ignored in dindnet
+
+  local reuse_volume=
+  if [[ ${1:-} = -r ]]; then
+    reuse_volume="-r"
+    shift
+  fi
+  # if there's just one node currently, it's master, thus we need to use
+  # kube-node-1 hostname, if there are two nodes, we should pick
+  # kube-node-2 and so on
+  local node_id=$1
+  
+  local node_number=$2
+
+  local node_ip="${dind_ip_base}${node_number}"
+  local -a opts
+  if [[ ${BUILD_KUBEADM} || ${BUILD_HYPERKUBE} ]]; then
+    opts+=(-v "dind-k8s-binaries$(dind::clusterSuffix)":/k8s)
+    if [[ ${BUILD_KUBEADM} ]]; then
+      opts+=(-e KUBEADM_SOURCE=build://)
+    fi
+    if [[ ${BUILD_HYPERKUBE} ]]; then
+      opts+=(-e HYPERKUBE_SOURCE=build://)
+    fi
+  fi
+  local node_name
+  node_name="$(dind::node-name ${node_id})"
+  #local node_number="$((next_node_index + 1))"
+  
+  dind::run ${reuse_volume} "$node_name" ${node_ip} ${node_number} "${EXTRA_PORTS}" ${opts[@]+"${opts[@]}"}
+}
+
 function dind::fix-missing-pause {
   # For issue https://github.com/kubernetes/kubeadm/issues/1003
   # The pause is not using the image repository
@@ -1306,8 +1521,8 @@ function dind::fix-missing-pause {
   # So pull the correct one and retag if using a custom repository
   if [[ "${KUBE_IMAGE_REPOSITORY}" ]]; then 
     dind::step "Fixing missing pause image"
-    docker exec "${container_id}" docker pull "${KUBE_IMAGE_REPOSITORY}/pause:3.1" 
-    docker exec "${container_id}" docker tag "${KUBE_IMAGE_REPOSITORY}/pause:3.1" "k8s.gcr.io/pause:3.1"
+    docker exec "${container_id}" docker pull "${KUBE_IMAGE_REPOSITORY}/pause-${ARCH}:3.1" 
+    docker exec "${container_id}" docker tag "${KUBE_IMAGE_REPOSITORY}/pause-${ARCH}:3.1" "k8s.gcr.io/pause:3.1"
   fi
 }
 
@@ -1316,6 +1531,14 @@ function dind::join {
   shift
   dind::proxy "${container_id}"
   dind::custom-docker-opts "${container_id}"
+
+  if [[ "$HOST_PRIVATE_REGISTRY" ]]; then
+    # Set the repository to the VPN gateway, it will NAT to the private registry
+    KUBE_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+    DASHBOARD_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+    KUBE_PROXY_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+    FLANNEL_IMAGE_REPOSITORY="${VPN_GATEWAY}:5000"
+  fi
 
   dind::fix-missing-pause "${container_id}"
   dind::kubeadm "${container_id}" join --skip-preflight-checks "$@" >/dev/null
@@ -1578,7 +1801,13 @@ function dind::up {
     flannel)
       # without --validate=false this will fail on older k8s versions
       #dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "https://github.com/coreos/flannel/blob/master/Documentation/kube-flannel.yml?raw=true"
-      dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "${DIND_ROOT}/deployments/kube-flannel.yml"
+      tmpfile=$(mktemp /tmp/kube-proxy.XXXXXX)
+      cat "${DIND_ROOT}/deployments/kube-flannel.yml" > ${tmpfile}
+      sed -i "s/{{REGISTRY}}/${FLANNEL_IMAGE_REPOSITORY}/" "${tmpfile}"
+
+      dind::retry "${kubectl}" --context "$ctx" apply --validate=false -f "${tmpfile}"
+      rm -f "${tmpfile}"
+
       ;;
     calico)
       dind::retry "${kubectl}" --context "$ctx" apply -f https://docs.projectcalico.org/v2.6/getting-started/kubernetes/installation/hosted/kubeadm/1.6/calico.yaml
@@ -1731,6 +1960,10 @@ function dind::api-server-name {
   echo "kube-api-server$( dind::clusterSuffix )"
 }
 
+function dind::private-registry-name {
+  echo "kube-private-registry$( dind::clusterSuffix )"
+}
+
 function dind::clusterSuffix {
   if [ "$DIND_LABEL" != "$DEFAULT_DIND_LABEL" ]; then
     echo "-$( dind::sha1 "$DIND_LABEL" )"
@@ -1750,7 +1983,7 @@ function dind::net-name {
 function dind::remove-volumes {
   # docker 1.13+: docker volume ls -q -f label="${DIND_LABEL}"
   local nameRE
-  nameRE="^kubeadm-dind-(sys|kube-master|kube-node-\\d+)$(dind::clusterSuffix)$"
+  nameRE="^kubeadm-dind-(sys|kube-master|kube-registry|kube-node-\\d+)$(dind::clusterSuffix)$"
   docker volume ls -q | (grep -E "$nameRE" || true) | while read -r volume_id; do
     dind::step "Removing volume:" "${volume_id}"
     docker volume rm "${volume_id}"
@@ -2057,9 +2290,11 @@ case "${1:-}" in
     shift
     dind::prepare-sys-mounts
     dind::ensure-kubectl
-    # Nodes in kubernetes must have unique names so their number must be unique. A node number can be specified through NODE_NUMBER environment variable
-    node_number=${WORKER_NODE_NUMBER:-}
-    dind::join "$(dind::create-node-container ${node_number})" "$@"
+    # Nodes in kubernetes must have unique names so their number must be unique. A node number can be specified through WORKER_NODE_ID environment variable
+    node_id=${WORKER_NODE_ID:-}
+    # TODO: for bridge networking this is not valid, because all pod networks will have the same subnet
+    # for other networks such as flannel this doesn't matter
+    dind::join "$(dind::create-worker-container ${node_id} "100")" "$@"
     ;;
   # bare)
   #   shift
@@ -2103,6 +2338,10 @@ case "${1:-}" in
     shift
     dind::prepare-worker "$@"
     ;;
+  prepare-client) 
+    shift
+    dind::prepare-client "$@"
+    ;;    
   *)
     echo "usage:" >&2
     echo "  $0 up" >&2
@@ -2119,7 +2358,8 @@ case "${1:-}" in
     echo "  $0 dump64" >&2
     echo "  $0 split-dump" >&2
     echo "  $0 split-dump64" >&2
-    echo "  $0 prepare-worker [--output-for-api]" >&2
+    echo "  $0 prepare-worker machineID [output-for-api]" >&2
+    echo "  $0 prepare-client name [output-for-api]" >&2
     exit 1
     ;;
 esac

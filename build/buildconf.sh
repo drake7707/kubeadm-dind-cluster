@@ -39,6 +39,9 @@ if [[ ${ARCH} == "arm" ]]; then
     KUBECTL_SHA1_1_11=c979e7402256630982dab8de677c5a4993121784
     KUBECTL_DARWIN_URL_1_11=
     KUBECTL_DARWIN_SHA1_1_11=
+
+    KUBELET_URL_1_11='https://storage.googleapis.com/kubernetes-release/release/v1.11.0/bin/linux/arm/kubelet'
+    KUBELET_SHA1_1_11=1b63a8adf2dfb803914343a2603d719297164687
 else 
     KUBEADM_URL_1_11='https://storage.googleapis.com/kubernetes-release/release/v1.11.0/bin/linux/amd64/kubeadm'
     KUBEADM_SHA1_1_11=67ccf0cf545ffc935e0e52db4a9b303f55dcf1cc
@@ -48,6 +51,9 @@ else
     KUBECTL_SHA1_1_11=e23f251ca0cb848802f3cb0f69a4ba297d07bfc6
     KUBECTL_DARWIN_URL_1_11='https://storage.googleapis.com/kubernetes-release/release/v1.11.0/bin/darwin/amd64/kubectl'
     KUBECTL_DARWIN_SHA1_1_11=6eff29a328c4bc00879fd6a0c8b33690c6f75908
+
+    KUBELET_URL_1_11='https://storage.googleapis.com/kubernetes-release/release/v1.11.0/bin/linux/amd64/kubelet'
+    KUBELET_SHA1_1_11=9e0f3fb99a05bc952b48eba6b5ced2174239883e
 fi
 
 # url and sha1sum of hyperkube binary -- only used for prebuilt hyperkube

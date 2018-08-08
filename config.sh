@@ -1,4 +1,64 @@
-if [[ ${IP_MODE} = "ipv4" ]]; then
+# Image repository for kube adm to pull images such as control plane from
+# Can be omitted when the private registry is hosted, then it will be pull from there
+KUBE_IMAGE_REPOSITORY=${REGISTRY:-k8s.gcr.io}
+DASHBOARD_IMAGE_REPOSITORY=${REGISTRY:-gcr.io}
+KUBE_PROXY_IMAGE_REPOSITORY=${REGISTRY:-gcr.io}
+FLANNEL_IMAGE_REPOSITORY=${REGISTRY:-quay.io}
+
+REGISTRY=${REGISTRY:-docker.io}
+IMAGE_PREFIX=${REGISTRY}/
+
+##############################
+#         VPN config         #
+##############################
+
+# vpn config for both
+VPN_SUBNET=${VPN_SUBNET:-192.168.254.0/24}
+VPN_GATEWAY=${VPN_GATEWAY:-192.168.254.1}
+
+# vpn config for master
+HOST_VPN_SERVER=y
+VPN_SERVER_IMAGE=${VPN_SERVER_IMAGE:-${IMAGE_PREFIX}idlabfuse/openvpn-server-${ARCH}}
+VPN_KEYSIZE=512
+VPN_PUBLIC_IP=${VPN_PUBLIC_IP:-}
+VPN_PUBLIC_PORT=${VPN_PUBLIC_PORT:-443}
+
+VPN_IMAGE=${VPN_IMAGE:-${IMAGE_PREFIX}idlabfuse/openvpn-client-${ARCH}}
+
+# set the vpn config file to use for the vpn client. Can be left blank for the master if it hosts a VPN server
+VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-}
+
+##############################
+#         API Server         #
+##############################
+
+# also run the api server container so workers can join based on the token alone
+HOST_API_SERVER=y
+API_SERVER_IMAGE=${API_SERVER_IMAGE:-${IMAGE_PREFIX}idlabfuse/fuse-api-server-${ARCH}}
+# The api server hosts a https endpoint and if the certificate & private key is left empty it will use the crt & key generated for the openvpn server
+API_CRT_FILE=
+API_KEY_FILE=
+
+##############################
+#     Private registry       #
+##############################
+
+# also host the private registry
+HOST_PRIVATE_REGISTRY=${HOST_PRIVATE_REGISTRY:-y}
+PRIVATE_REGISTRY_IMAGE=registry:2
+PRIVATE_REGISTRY_TAR_DIR="$(pwd)/images"
+#PRIVATE_REGISTRY_TAR_DIR=/home/dwight/fuse/output/fuse-master/images
+PRIVATE_REGISTRY_TAR_FILE=fuse_repository.tar
+
+
+##############################
+#         DinD config        #
+##############################
+
+# The image repository is insecure, so make sure to add it to the /etc/docker/daemon.json
+DIND_INSECURE_REGISTRIES="[ \"${REGISTRY}\", \"${VPN_GATEWAY}:5000\" ]"
+
+if [[ ${IP_MODE:-ipv4} = "ipv4" ]]; then
     # DinD subnet (expected to be /16)
     DIND_SUBNET="${DIND_SUBNET:-10.192.0.0}"
 else
@@ -6,41 +66,7 @@ else
     DIND_SUBNET="${DIND_SUBNET:-fd00:10::}"
 fi
 
-ARCH=arm
-
-# vpn config for both
-VPN_SUBNET=192.168.254.0/24
-
-# vpn config for master
-HOST_VPN_SERVER=y
-VPN_SERVER_IMAGE=${VPN_SERVER_IMAGE:-idlabfuse/openvpn-server-${ARCH}}
-VPN_KEYSIZE=512
-VPN_PUBLIC_IP=${VPN_PUBLIC_IP:-10.10.127.41}
-VPN_PUBLIC_PORT=${VPN_PUBLIC_PORT:-443}
-
-VPN_IMAGE=${VPN_IMAGE:-idlabfuse/openvpn-client-${ARCH}}
-
-# if master hosts the vpn server then this is not necessary for the master
-VPN_CONFIG_FILE=${VPN_CONFIG_FILE:-}
-
-API_SERVER_IMAGE=${API_SERVER_IMAGE:-idlabfuse/fuse-api-server-${ARCH}}
-
-# also run the api server container so workers can join based on the token alone
-HOST_API_SERVER=y
-
-# The api server hosts a https endpoint and if the certificate & private key is left empty it will use the crt & key generated for the openvpn server
-API_CRT_FILE=
-API_KEY_FILE=
-
 REMOTE_DNS64_V4SERVER=8.8.8.8
-
-
-# Image repository for kube adm to pull images such as control plane from
-#KUBE_IMAGE_REPOSITORY=${KUBE_IMAGE_REPOSITORY:-k8s.gcr.io}
-#KUBE_IMAGE_REPOSITORY=10.10.127.48:5000
-
-# The image repository is insecure, so make sure to add it to the /etc/docker/daemon.json
-DIND_INSECURE_REGISTRIES="[ \"10.10.127.48:5000\" ]"
 
 # Apiserver port
 APISERVER_PORT=${APISERVER_PORT:-8080}
@@ -54,13 +80,14 @@ APISERVER_BINDIP=0.0.0.0
 NUM_NODES=0
 
 # Make sure that each worker that joins the cluster gets assigned an unique number
-WORKER_NODE_NUMBER=${WORKER_NODE_NUMBER:-0}
+WORKER_NODE_ID=${WORKER_NODE_ID:-0}
 
 # Use non-dockerized build
 # KUBEADM_DIND_LOCAL=
 
 # Use prebuilt DIND image
-DIND_IMAGE="${DIND_IMAGE:-idlabfuse/kubeadm-dind-cluster-${ARCH}:v1.11}"
+DIND_IMAGE="${DIND_IMAGE:-${IMAGE_PREFIX}idlabfuse/kubeadm-dind-cluster-${ARCH}:v1.11}"
+#DIND_IMAGE="${DIND_IMAGE:-idlabfuse/kubeadm-dind-cluster-worker-${ARCH}:v1.11}"
 DIND_SKIP_PULL=y
 
 # Set to non-empty string to enable building kubeadm

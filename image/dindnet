@@ -107,6 +107,12 @@ function dind::setup-vpn-route {
   ip link add veth0 type veth peer name veth1
   ip addr add ${VPN_IP:-} dev veth0
   ip link set veth0 up
+
+  # Make sure that all packets that are sent from flannel get the source rewritten 
+  # otherwise it's possible that the vpn container eth0 won't accept the packets
+  # They come from flannel because the flannel is bound to the ip of veth0, which is set to the vpn ip
+  # This wasn't a problem on debian amd64 but did happen on raspbian on a rpi.
+  iptables -D INPUT -s ${VPN_IP:-} -i eth0 -j SNAT --to-source ${CONTAINER_IP:-} -t nat
 }
 
 function dind::fix-udp-checksum {

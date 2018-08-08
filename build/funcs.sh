@@ -101,7 +101,7 @@ function dind::build-base {
     docker build -t "${BARE_IMAGE_NAME}" -f image/Dockerfile.${ARCH} image/
 }
 
-function dind::build-image {
+function dind::build-master-image {
     local name="$1"
     # local -a images=("${prepull_images[@]}")
     local -a images=()
@@ -115,5 +115,15 @@ function dind::build-image {
            --build-arg KUBEADM_SHA1="${KUBEADM_SHA1}" \
            --build-arg HYPERKUBE_URL="${HYPERKUBE_URL}" \
            --build-arg HYPERKUBE_SHA1="${HYPERKUBE_SHA1}" \
+           .
+}
+
+function dind::build-worker-image {
+    local name="$1"
+    docker build -t "${name}" -f Dockerfile-worker.${ARCH} \
+           --build-arg KUBEADM_URL="${KUBEADM_URL}" \
+           --build-arg KUBEADM_SHA1="${KUBEADM_SHA1}" \
+           --build-arg KUBELET_URL="${KUBELET_URL}" \
+           --build-arg KUBELET_SHA1="${KUBELET_SHA1}" \
            .
 }

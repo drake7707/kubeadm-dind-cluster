@@ -26,7 +26,7 @@ spec:
         - /usr/local/bin/kube-proxy
         - --config=/var/lib/kube-proxy/config.conf
         #image: gcr.io/google_containers/kube-proxy-amd64:v1.9.9
-        image: "10.10.127.48:5000/google_containers/kube-proxy-amd64:v1.9.9"
+        image: "{{REGISTRY}}/kube-proxy-amd64:v1.11.0"
         imagePullPolicy: IfNotPresent
         name: kube-proxy-amd64
         resources: {}
@@ -108,7 +108,7 @@ spec:
         - /usr/local/bin/kube-proxy
         - --config=/var/lib/kube-proxy/config.conf
         #image: gcr.io/google_containers/kube-proxy-arm:v1.9.9
-        image: "10.10.127.48:5000/google_containers/kube-proxy-arm:v1.9.9"
+        image: "{{REGISTRY}}/kube-proxy-arm:v1.11.0"
         imagePullPolicy: IfNotPresent
         name: kube-proxy-arm
         resources: {}

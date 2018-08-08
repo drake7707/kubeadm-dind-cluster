@@ -26,7 +26,10 @@ source "$DIND_ROOT/build/funcs.sh"
 
 dind::build-base
 
-IMAGE_NAME="idlabfuse/kubeadm-dind-cluster"
+IMAGE_NAME="${IMAGE_PREFIX:-}idlabfuse/kubeadm-dind-cluster"
+
+PUSH_IMAGES=${PUSH_IMAGES:-}
+
 v="1.11"
 
 version="${v//./_}"
@@ -35,7 +38,22 @@ eval "HYPERKUBE_SHA1=\${HYPERKUBE_SHA1_${version}}"
 kubeadm_version="${version}"
 eval "KUBEADM_URL=\${KUBEADM_URL_${version}}"
 eval "KUBEADM_SHA1=\${KUBEADM_SHA1_${version}}"
-tag="v${v}"
-cur_image="${IMAGE_NAME}-${ARCH}:${tag}"
 
-dind::build-image "${cur_image}"
+eval "KUBELET_URL=\${KUBELET_URL_${version}}"
+eval "KUBELET_SHA1=\${KUBELET_SHA1_${version}}"
+
+tag="v${v}"
+
+cur_image="${IMAGE_NAME}-${ARCH}:${tag}"
+dind::build-master-image "${cur_image}"
+
+if [[ "${PUSH_IMAGES}" ]]; then
+  docker push ${cur_image}
+fi
+
+cur_image="${IMAGE_NAME}-worker-${ARCH}:${tag}"
+dind::build-worker-image "${cur_image}"
+
+if [[ "${PUSH_IMAGES}" ]]; then
+  docker push ${cur_image}
+fi

@@ -1,0 +1,26 @@
+FROM idlabfuse/kubeadm-dind-cluster-amd64:bare-v4
+
+
+# the following args should be set for derived images
+
+ARG PREBUILT_KUBEADM_AND_KUBELET
+ARG KUBEADM_URL
+ARG KUBEADM_SHA1
+ARG KUBELET_URL
+ARG KUBELET_SHA1
+
+RUN if [ -n "${KUBEADM_URL}" ]; then \
+      mkdir -p /k8s && \
+      curl -sSL "${KUBEADM_URL}" > /k8s/kubeadm && \
+      if [ -n "${KUBEADM_SHA1}" ]; then echo "${KUBEADM_SHA1}  /k8s/kubeadm" | sha1sum -c; fi && \
+      chmod +x /k8s/kubeadm; \
+    fi; \
+    if [ -n "${KUBELET_URL}" ]; then \
+      rm -f /usr/bin/kubelet && \
+      curl -sSL "${KUBELET_URL}" > /k8s/kubelet && \
+      if [ -n "${KUBELET_SHA1}" ]; then echo "${KUBELET_SHA1}  /k8s/kubelet" | sha1sum -c; fi && \
+      chmod +x /k8s/kubelet && \
+      ln -s /k8s/kubelet /usr/bin/kubelet; \
+    fi
+
+ENTRYPOINT ["/sbin/dind_init"]

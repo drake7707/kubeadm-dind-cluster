@@ -45,10 +45,12 @@ spec:
             }
           ]
     spec:
+      nodeSelector:
+        beta.kubernetes.io/arch: amd64    
       containers:
       - name: kubernetes-dashboard
         #image: gcr.io/google_containers/kubernetes-dashboard-amd64:v1.6.0
-        image: 10.10.127.48:5000/google_containers/kubernetes-dashboard-amd64:v1.6.0
+        image: "{{REGISTRY}}/google_containers/kubernetes-dashboard-amd64:v1.8.3"
         imagePullPolicy: Always
         ports:
         - containerPort: 9090

@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: fuse-dummy
-        image: 10.10.127.48:5000/idlabfuse/fuse-dummy:v0.0.1
+        image: "{{REGISTRY}}/idlabfuse/fuse-dummy:v0.0.1"
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
